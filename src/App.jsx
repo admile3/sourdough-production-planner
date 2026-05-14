@@ -203,6 +203,32 @@ function addMinutesToTime(time, minutes) {
   return minutesToClock(timeToMinutes(time) + Math.round(minutes));
 }
 
+function getTodayISODate() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatDisplayDate(dateString) {
+  if (!dateString) return "";
+  const [year, month, day] = dateString.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+
+  return date.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function resourceLabel(resource) {
+  if (!resource) return "";
+  return resource.charAt(0).toUpperCase() + resource.slice(1);
+}
+
 function tempFermentationFactor(tempF, baselineF) {
   const diff = tempF - baselineF;
   const factor = 1 - diff * 0.035;
@@ -331,7 +357,13 @@ function buildProductionSchedule(plans, settings) {
     const qty = plan.quantity;
     const process = plan.recipe.process;
 
-    const addTask = ({ name, duration, earliestStart, resource = "passive", note = "" }) => {
+    const addTask = ({
+      name,
+      duration,
+      earliestStart,
+      resource = "passive",
+      note = "",
+    }) => {
       let start = earliestStart;
 
       if (resource === "mixer") {
@@ -375,7 +407,7 @@ function buildProductionSchedule(plans, settings) {
         duration: process.autolyseMin,
         earliestStart: current,
         resource: "baker",
-        note: `${qty} units`,
+        note: "",
       });
     }
 
@@ -398,7 +430,7 @@ function buildProductionSchedule(plans, settings) {
       start: bulkStart,
       end: bulkEnd,
       duration: plan.bulkMin,
-      note: `${minutesToLabel(plan.bulkMin)}`,
+      note: "",
     });
 
     const foldCount = process.foldCount || 0;
@@ -412,7 +444,7 @@ function buildProductionSchedule(plans, settings) {
         duration: 5,
         earliestStart: foldStartTarget,
         resource: "baker",
-        note: product,
+        note: "",
       });
     }
 
@@ -424,7 +456,7 @@ function buildProductionSchedule(plans, settings) {
         duration: 12,
         earliestStart: current,
         resource: "baker",
-        note: `${qty} units`,
+        note: "",
       });
 
       schedule.push({
@@ -435,7 +467,7 @@ function buildProductionSchedule(plans, settings) {
         start: current,
         end: current + process.benchRestMin,
         duration: process.benchRestMin,
-        note: `${minutesToLabel(process.benchRestMin)}`,
+        note: "",
       });
 
       current += process.benchRestMin;
@@ -446,7 +478,7 @@ function buildProductionSchedule(plans, settings) {
       duration: Math.max(10, qty * 2),
       earliestStart: current,
       resource: "baker",
-      note: `${qty} units`,
+      note: "",
     });
 
     schedule.push({
@@ -457,7 +489,7 @@ function buildProductionSchedule(plans, settings) {
       start: current,
       end: current + plan.finalProofMin,
       duration: plan.finalProofMin,
-      note: `${minutesToLabel(plan.finalProofMin)}`,
+      note: "",
     });
 
     current += plan.finalProofMin;
@@ -480,7 +512,7 @@ function buildProductionSchedule(plans, settings) {
       start: current,
       end: current + process.coolMin,
       duration: process.coolMin,
-      note: `${minutesToLabel(process.coolMin)}`,
+      note: "",
     });
   });
 
@@ -552,6 +584,7 @@ export default function App() {
   const [recipes, setRecipes] = useState(initialRecipes);
   const [settings, setSettings] = useState(defaultSettings);
   const [env, setEnv] = useState({ tempF: 74, humidityPct: 52 });
+  const [productionDate, setProductionDate] = useState(getTodayISODate());
   const [quantities, setQuantities] = useState({
     "rustic-loaf": 12,
     ciabatta: 20,
@@ -1152,20 +1185,35 @@ export default function App() {
           <div className="layout">
             <Card>
               <CardContent className="panel">
-                <div className="section-head">
+                <div className="section-head production-sheet-head">
                   <div>
                     <h2>Bake Day Production Sheet</h2>
+                    <p className="production-date-display">
+                      {formatDisplayDate(productionDate)}
+                    </p>
                     <p>
                       Generated from current recipes, quantities, conditions, and
                       settings.
                     </p>
                   </div>
-                  <Button onClick={() => window.print()}>
-                    <Printer size={16} /> Print
-                  </Button>
+
+                  <div className="production-actions">
+                    <label className="field production-date-field">
+                      <span>Production Date</span>
+                      <input
+                        type="date"
+                        value={productionDate}
+                        onChange={(e) => setProductionDate(e.target.value)}
+                      />
+                    </label>
+
+                    <Button onClick={() => window.print()}>
+                      <Printer size={16} /> Print
+                    </Button>
+                  </div>
                 </div>
 
-                <div className="grid four">
+                <div className="grid four production-stats-grid">
                   <StatCard
                     icon={Scale}
                     label="Total Dough"
@@ -1284,7 +1332,7 @@ export default function App() {
                             <strong>{task.product}</strong>
                           </td>
                           <td>{task.name}</td>
-                          <td>{task.resource}</td>
+                          <td>{resourceLabel(task.resource)}</td>
                           <td>{minutesToLabel(task.duration)}</td>
                           <td className="tiny">{task.note}</td>
                         </tr>
