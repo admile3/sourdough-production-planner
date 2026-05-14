@@ -9,6 +9,7 @@ const firebaseConfig = {
   storageBucket: "sourdough-production-planner.firebasestorage.app",
   messagingSenderId: "45332994857",
   appId: "1:45332994857:web:7cccb2b85a652899217538",
+  measurementId: "G-V20PFG30Q2"
 };
 
 const app = initializeApp(firebaseConfig);
