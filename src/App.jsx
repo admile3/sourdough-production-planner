@@ -629,26 +629,31 @@ export default function App() {
   const [productionDate, setProductionDate] = useState(() =>
     loadFromStorage("sourdoughPlannerProductionDate", getTodayISODate())
   );
-  const [quantities, setQuantities] = useState(() =>
-    loadFromStorage("sourdoughPlannerQuantities", {
-      "rustic-loaf": 12,
-      ciabatta: 20,
-      baguette: 24,
-      "sandwich-loaf": 8,
-    })
+  const [productionItems, setProductionItems] = useState(() =>
+    loadFromStorage("sourdoughPlannerProductionItems", [])
   );
   const [selectedRecipeId, setSelectedRecipeId] = useState(
     recipes[0]?.id || initialRecipes[0].id
   );
   const [lastSavedAt, setLastSavedAt] = useState("");
 
+  const productionRecipes = useMemo(() => {
+    return productionItems
+      .map((item) => {
+        const recipe = recipes.find((r) => r.id === item.recipeId);
+        if (!recipe) return null;
+        return { recipe, quantity: Number(item.quantity) || 0 };
+      })
+      .filter(Boolean);
+  }, [productionItems, recipes]);
+
   const plans = useMemo(() => {
-    return recipes
-      .map((recipe) =>
-        calculateRecipePlan(recipe, quantities[recipe.id], env, settings)
+    return productionRecipes
+      .map(({ recipe, quantity }) =>
+        calculateRecipePlan(recipe, quantity, env, settings)
       )
       .filter((plan) => plan.quantity > 0);
-  }, [recipes, quantities, env, settings]);
+  }, [productionRecipes, env, settings]);
 
   const productionSchedule = useMemo(() => {
     return buildProductionSchedule(plans, settings);
@@ -748,12 +753,17 @@ export default function App() {
   const selectedRecipe =
     recipes.find((r) => r.id === selectedRecipeId) || recipes[0];
 
+  const availableRecipesForCycle = useMemo(() => {
+    const usedIds = new Set(productionItems.map((item) => item.recipeId));
+    return recipes.filter((recipe) => !usedIds.has(recipe.id));
+  }, [recipes, productionItems]);
+
   function savePlannerData() {
     saveToStorage("sourdoughPlannerRecipes", recipes);
     saveToStorage("sourdoughPlannerSettings", settings);
     saveToStorage("sourdoughPlannerEnv", env);
     saveToStorage("sourdoughPlannerProductionDate", productionDate);
-    saveToStorage("sourdoughPlannerQuantities", quantities);
+    saveToStorage("sourdoughPlannerProductionItems", productionItems);
 
     setLastSavedAt(
       new Date().toLocaleTimeString("en-US", {
@@ -878,6 +888,33 @@ export default function App() {
     );
   }
 
+  function addRecipeToCycle(recipeId) {
+    if (!recipeId) return;
+
+    setProductionItems((prev) => {
+      if (prev.some((item) => item.recipeId === recipeId)) return prev;
+      return [...prev, { recipeId, quantity: 0 }];
+    });
+  }
+
+  function updateCycleQuantity(recipeId, quantity) {
+    setProductionItems((prev) =>
+      prev.map((item) =>
+        item.recipeId === recipeId
+          ? { ...item, quantity: Number(quantity) }
+          : item
+      )
+    );
+  }
+
+  function removeRecipeFromCycle(recipeId) {
+    setProductionItems((prev) => prev.filter((item) => item.recipeId !== recipeId));
+  }
+
+  function clearCycle() {
+    setProductionItems([]);
+  }
+
   function addRecipe() {
     const id = `recipe-${Date.now()}`;
     const base = {
@@ -892,7 +929,6 @@ export default function App() {
     };
     setRecipes((prev) => [...prev, base]);
     setSelectedRecipeId(id);
-    setQuantities((prev) => ({ ...prev, [id]: 0 }));
     setActiveTab("recipes");
   }
 
@@ -903,18 +939,13 @@ export default function App() {
       { ...selectedRecipe, id, name: `${selectedRecipe.name} Copy` },
     ]);
     setSelectedRecipeId(id);
-    setQuantities((prev) => ({ ...prev, [id]: quantities[selectedRecipe.id] || 0 }));
   }
 
   function deleteRecipe(id) {
     if (recipes.length <= 1) return;
     setRecipes((prev) => prev.filter((r) => r.id !== id));
+    setProductionItems((prev) => prev.filter((item) => item.recipeId !== id));
     setSelectedRecipeId(recipes.find((r) => r.id !== id)?.id || recipes[0].id);
-    setQuantities((prev) => {
-      const updated = { ...prev };
-      delete updated[id];
-      return updated;
-    });
   }
 
   const tabButton = (id, label, Icon) => (
@@ -972,38 +1003,93 @@ export default function App() {
                     <div>
                       <h2>Production Quantities</h2>
                       <p>
-                        Enter how many finished goods you want for this bake
-                        period.
+                        Add only the recipes you want for this specific bake
+                        cycle. This does not change your saved Recipe Library.
                       </p>
                     </div>
-                    <Button onClick={addRecipe}>
-                      <Plus size={16} /> Add Product
-                    </Button>
+                    <div className="button-row">
+                      <Button onClick={() => addRecipeToCycle(availableRecipesForCycle[0]?.id)}>
+                        <Plus size={16} /> Add Product
+                      </Button>
+                      <Button variant="outline" onClick={clearCycle}>
+                        <Trash2 size={16} /> Clear Cycle
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="soft-panel">
+                    <div className="grid two">
+                      <label className="field">
+                        <span>Add Recipe to This Bake Cycle</span>
+                        <select
+                          className="text-field"
+                          value=""
+                          onChange={(e) => addRecipeToCycle(e.target.value)}
+                        >
+                          <option value="">Select a recipe...</option>
+                          {availableRecipesForCycle.map((recipe) => (
+                            <option key={recipe.id} value={recipe.id}>
+                              {recipe.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <div className="field">
+                        <span>Cycle Status</span>
+                        <div className="pill">
+                          {productionItems.length === 0
+                            ? "No products added to this bake cycle yet."
+                            : `${productionItems.length} product${
+                                productionItems.length === 1 ? "" : "s"
+                              } in this bake cycle.`}
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="stack">
-                    {recipes.map((recipe) => (
-                      <div key={recipe.id} className="recipe-row">
-                        <div>
-                          <p className="recipe-title">{recipe.name}</p>
-                          <p className="muted small">
-                            {recipe.finishedUnitWeight}g finished weight •{" "}
-                            {recipe.hydrationPct}% base hydration •{" "}
-                            {recipe.starterPct}% starter • {recipe.vesselType}
-                          </p>
-                        </div>
-                        <NumberInput
-                          label={`Qty (${recipe.unitsLabel})`}
-                          value={quantities[recipe.id] || ""}
-                          onChange={(v) =>
-                            setQuantities((prev) => ({
-                              ...prev,
-                              [recipe.id]: Number(v),
-                            }))
-                          }
-                        />
+                    {productionItems.length === 0 && (
+                      <div className="soft-panel">
+                        <h3>No Products Added Yet</h3>
+                        <p className="muted small">
+                          Use the dropdown above to add recipes from your Recipe
+                          Library into this specific bake cycle.
+                        </p>
                       </div>
-                    ))}
+                    )}
+
+                    {productionItems.map((item) => {
+                      const recipe = recipes.find((r) => r.id === item.recipeId);
+
+                      if (!recipe) return null;
+
+                      return (
+                        <div key={item.recipeId} className="recipe-row editable-row">
+                          <div>
+                            <p className="recipe-title">{recipe.name}</p>
+                            <p className="muted small">
+                              {recipe.finishedUnitWeight}g finished weight •{" "}
+                              {recipe.hydrationPct}% base hydration •{" "}
+                              {recipe.starterPct}% starter • {recipe.vesselType}
+                            </p>
+                          </div>
+
+                          <NumberInput
+                            label={`Qty (${recipe.unitsLabel})`}
+                            value={item.quantity}
+                            onChange={(v) => updateCycleQuantity(recipe.id, v)}
+                          />
+
+                          <Button
+                            variant="outline"
+                            onClick={() => removeRecipeFromCycle(recipe.id)}
+                          >
+                            <Trash2 size={16} /> Remove
+                          </Button>
+                        </div>
+                      );
+                    })}
                   </div>
                 </CardContent>
               </Card>
