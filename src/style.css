@@ -224,6 +224,13 @@ input {
   line-height: 1.5;
 }
 
+.saved-status {
+  margin-top: 8px !important;
+  color: #166534 !important;
+  font-weight: 700;
+  font-size: 13px !important;
+}
+
 .production-sheet-head {
   align-items: flex-start;
 }
@@ -282,6 +289,10 @@ input {
   padding: 18px;
 }
 
+.editable-row {
+  grid-template-columns: minmax(260px, 1fr) 180px auto;
+}
+
 .recipe-title {
   font-size: 18px;
   font-weight: 800;
@@ -321,14 +332,32 @@ input {
   background: white;
 }
 
-.input-wrap input,
-.field input {
+.input-wrap input {
   width: 100%;
   border: 0;
   background: transparent;
   padding: 13px 14px;
   font-size: 15px;
   outline: none;
+}
+
+.text-field,
+.field > input:not(.input-wrap input) {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: white;
+  padding: 13px 14px;
+  font-size: 15px;
+  outline: none;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.02);
+}
+
+.text-field:focus,
+.field > input:not(.input-wrap input):focus,
+.input-wrap:focus-within {
+  border-color: rgba(155, 107, 51, 0.55);
+  box-shadow: 0 0 0 3px rgba(155, 107, 51, 0.12);
 }
 
 .suffix {
@@ -566,6 +595,10 @@ tbody tr.alt {
 
   .two {
     grid-template-columns: repeat(2, minmax(240px, 1fr));
+  }
+
+  .editable-row {
+    grid-template-columns: 1fr;
   }
 }
 
