@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Plus,
@@ -19,7 +19,13 @@ import {
   FlaskConical,
   Save,
   Copy,
+  LogIn,
+  LogOut,
+  Cloud,
 } from "lucide-react";
+import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { auth, db, googleProvider } from "./firebase";
 
 function Card({ children, className = "" }) {
   return <div className={`card ${className}`}>{children}</div>;
@@ -29,10 +35,11 @@ function CardContent({ children, className = "" }) {
   return <div className={className}>{children}</div>;
 }
 
-function Button({ children, onClick, className = "", variant, size }) {
+function Button({ children, onClick, className = "", variant, size, disabled }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={`btn ${variant || ""} ${size || ""} ${className}`}
     >
       {children}
@@ -223,7 +230,6 @@ function formatOunces(value) {
 
 function formatWeight(value, label = "") {
   const grams = Number(value) || 0;
-
   const base =
     grams > GRAMS_PER_OUNCE
       ? `${formatGrams(grams)}/${formatOunces(grams)}oz`
@@ -806,6 +812,11 @@ function TextInput({ label, value, onChange, placeholder = "" }) {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("planner");
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [cloudLoading, setCloudLoading] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState("Local only");
+
   const [recipes, setRecipes] = useState(() =>
     loadFromStorage("sourdoughPlannerRecipes", initialRecipes).map(normalizeRecipe)
   );
@@ -825,6 +836,53 @@ export default function App() {
     recipes[0]?.id || initialRecipes[0].id
   );
   const [lastSavedAt, setLastSavedAt] = useState("");
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+
+      if (!currentUser) {
+        setCloudStatus("Local only");
+        return;
+      }
+
+      setCloudLoading(true);
+      setCloudStatus("Loading cloud data...");
+
+      try {
+        const ref = doc(db, "users", currentUser.uid, "appData", "main");
+        const snapshot = await getDoc(ref);
+
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+
+          if (Array.isArray(data.recipes)) {
+            setRecipes(data.recipes.map(normalizeRecipe));
+            setSelectedRecipeId(data.recipes[0]?.id || initialRecipes[0].id);
+          }
+
+          if (data.settings) setSettings({ ...defaultSettings, ...data.settings });
+          if (data.env) setEnv(data.env);
+          if (data.productionDate) setProductionDate(data.productionDate);
+          if (Array.isArray(data.productionItems)) {
+            setProductionItems(data.productionItems);
+          }
+
+          setCloudStatus("Cloud data loaded");
+        } else {
+          setCloudStatus("No cloud save yet");
+        }
+      } catch (error) {
+        console.error(error);
+        setCloudStatus("Cloud load failed");
+      } finally {
+        setCloudLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const productionRecipes = useMemo(() => {
     return productionItems
@@ -947,19 +1005,73 @@ export default function App() {
     return recipes.filter((recipe) => !usedIds.has(recipe.id));
   }, [recipes, productionItems]);
 
-  function savePlannerData() {
-    saveToStorage("sourdoughPlannerRecipes", recipes.map(normalizeRecipe));
+  async function handleSignIn() {
+    try {
+      setCloudStatus("Signing in...");
+      await signInWithPopup(auth, googleProvider);
+    } catch (error) {
+      console.error(error);
+      setCloudStatus("Sign in failed");
+    }
+  }
+
+  async function handleSignOut() {
+    try {
+      await signOut(auth);
+      setCloudStatus("Local only");
+    } catch (error) {
+      console.error(error);
+      setCloudStatus("Sign out failed");
+    }
+  }
+
+  async function savePlannerData() {
+    const normalizedRecipes = recipes.map(normalizeRecipe);
+
+    saveToStorage("sourdoughPlannerRecipes", normalizedRecipes);
     saveToStorage("sourdoughPlannerSettings", settings);
     saveToStorage("sourdoughPlannerEnv", env);
     saveToStorage("sourdoughPlannerProductionDate", productionDate);
     saveToStorage("sourdoughPlannerProductionItems", productionItems);
 
-    setLastSavedAt(
-      new Date().toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-      })
-    );
+    const savedTime = new Date().toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+
+    setLastSavedAt(savedTime);
+
+    if (!user) {
+      setCloudStatus("Saved locally");
+      return;
+    }
+
+    setCloudLoading(true);
+    setCloudStatus("Saving to cloud...");
+
+    try {
+      const ref = doc(db, "users", user.uid, "appData", "main");
+
+      await setDoc(
+        ref,
+        {
+          recipes: normalizedRecipes,
+          settings,
+          env,
+          productionDate,
+          productionItems,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      setCloudStatus(`Cloud saved at ${savedTime}`);
+    } catch (error) {
+      console.error(error);
+      setCloudStatus("Cloud save failed");
+    } finally {
+      setCloudLoading(false);
+    }
   }
 
   function updateRecipeField(field, value) {
@@ -1167,6 +1279,28 @@ export default function App() {
                 humidity, and altitude, then generate a practical production
                 sheet for your bake day.
               </p>
+              <div className="button-row" style={{ marginTop: "14px" }}>
+                {user ? (
+                  <>
+                    <Button variant="outline" onClick={savePlannerData} disabled={cloudLoading}>
+                      <Cloud size={16} /> {cloudLoading ? "Syncing..." : "Save / Sync"}
+                    </Button>
+                    <Button variant="outline" onClick={handleSignOut}>
+                      <LogOut size={16} /> Sign Out
+                    </Button>
+                    <span className="pill">
+                      {user.displayName || user.email} • {cloudStatus}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Button onClick={handleSignIn} disabled={authLoading}>
+                      <LogIn size={16} /> Sign in with Google
+                    </Button>
+                    <span className="pill">{cloudStatus}</span>
+                  </>
+                )}
+              </div>
             </div>
             <div className="hero-stats">
               <div>
@@ -1256,7 +1390,6 @@ export default function App() {
 
                     {productionItems.map((item) => {
                       const recipe = recipes.find((r) => r.id === item.recipeId);
-
                       if (!recipe) return null;
 
                       return (
@@ -2102,10 +2235,11 @@ export default function App() {
                 <div className="soft-panel">
                   <div className="inline-head">
                     <Save size={16} />
-                    <strong>Next build recommendation</strong>
+                    <strong>Cloud Sync Active</strong>
                   </div>
-                  Add Google Sheets syncing so recipes, settings, plans, and
-                  production history persist across computers.
+                  {user
+                    ? "Signed in data can now be saved to Firestore and opened from another device after signing into the same Google account."
+                    : "Sign in with Google to save recipes, settings, and bake cycles to the cloud."}
                 </div>
               </CardContent>
             </Card>
