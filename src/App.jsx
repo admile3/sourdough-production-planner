@@ -372,18 +372,13 @@ function buildProductionSchedule(plans, settings) {
   const productStates = new Map();
 
   const sortedPlans = [...plans].sort((a, b) => {
-    const aLead =
-      a.recipe.process.autolyseMin +
-      a.recipe.process.mixMin +
-      a.bulkMin +
-      a.recipe.process.benchRestMin +
-      a.finalProofMin;
-    const bLead =
-      b.recipe.process.autolyseMin +
-      b.recipe.process.mixMin +
-      b.bulkMin +
-      b.recipe.process.benchRestMin +
-      b.finalProofMin;
+    const aAutolyse = Number(a.recipe.process.autolyseMin) || 0;
+    const bAutolyse = Number(b.recipe.process.autolyseMin) || 0;
+
+    if (bAutolyse !== aAutolyse) return bAutolyse - aAutolyse;
+
+    const aLead = a.bulkMin + a.finalProofMin;
+    const bLead = b.bulkMin + b.finalProofMin;
 
     return bLead - aLead;
   });
@@ -462,30 +457,8 @@ function buildProductionSchedule(plans, settings) {
     });
   };
 
-  const scheduleFoldsInsideBulk = (plan, bulkStart, bulkEnd) => {
-    const process = plan.recipe.process;
-    const foldCount = Number(process.foldCount) || 0;
-    const foldInterval = Number(process.foldIntervalMin) || 30;
-
-    for (let i = 1; i <= foldCount; i++) {
-      const targetStart = bulkStart + i * foldInterval;
-      const latestReasonableStart = Math.max(bulkStart, bulkEnd - 5);
-      const foldStart = Math.min(targetStart, latestReasonableStart);
-
-      scheduleBakerTask({
-        plan,
-        name: `Fold ${i}`,
-        earliestStart: foldStart,
-        duration: 5,
-        note: "",
-      });
-    }
-  };
-
   sortedPlans.forEach((plan) => {
-    const process = plan.recipe.process;
-    const autolyseMin = Number(process.autolyseMin) || 0;
-
+    const autolyseMin = Number(plan.recipe.process.autolyseMin) || 0;
     let autolyseStart = startMin;
     let autolyseEnd = startMin;
 
@@ -515,7 +488,12 @@ function buildProductionSchedule(plans, settings) {
     });
   });
 
-  Array.from(productStates.values()).forEach((state) => {
+  const mixQueue = Array.from(productStates.values()).sort((a, b) => {
+    if (a.autolyseEnd !== b.autolyseEnd) return a.autolyseEnd - b.autolyseEnd;
+    return b.plan.bulkMin - a.plan.bulkMin;
+  });
+
+  mixQueue.forEach((state) => {
     const plan = state.plan;
     const process = plan.recipe.process;
 
@@ -539,10 +517,46 @@ function buildProductionSchedule(plans, settings) {
       note: "",
     });
 
-    scheduleFoldsInsideBulk(plan, state.bulkStart, state.bulkEnd);
-
     state.readyForShapeAt = state.bulkEnd;
   });
+
+  const foldTasks = [];
+
+  Array.from(productStates.values()).forEach((state) => {
+    const plan = state.plan;
+    const process = plan.recipe.process;
+    const foldCount = Number(process.foldCount) || 0;
+    const foldInterval = Number(process.foldIntervalMin) || 30;
+
+    for (let i = 1; i <= foldCount; i++) {
+      const targetStart = state.bulkStart + i * foldInterval;
+
+      foldTasks.push({
+        plan,
+        name: `Fold ${i}`,
+        earliestStart: targetStart,
+        duration: 5,
+      });
+    }
+  });
+
+  foldTasks
+    .sort((a, b) => {
+      if (a.earliestStart !== b.earliestStart) {
+        return a.earliestStart - b.earliestStart;
+      }
+
+      return a.plan.recipe.name.localeCompare(b.plan.recipe.name);
+    })
+    .forEach((fold) => {
+      scheduleBakerTask({
+        plan: fold.plan,
+        name: fold.name,
+        earliestStart: fold.earliestStart,
+        duration: fold.duration,
+        note: "",
+      });
+    });
 
   const shapingQueue = Array.from(productStates.values()).sort(
     (a, b) => a.readyForShapeAt - b.readyForShapeAt
@@ -1805,9 +1819,9 @@ export default function App() {
                 <div className="soft-panel">
                   <h3>Resource-Aware Production Timeline</h3>
                   <p className="muted small">
-                    This schedule front-loads autolyse and mixing so products
-                    can share passive bulk fermentation, proofing, and cooling
-                    time while still preventing mixer, oven, and hands-on baker
+                    This schedule prioritizes shared phases: all autolyse steps
+                    first, all mixing next, then folding, shaping, proofing, and
+                    baking while preventing mixer, oven, and hands-on baker
                     conflicts.
                   </p>
                 </div>
