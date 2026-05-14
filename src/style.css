@@ -50,8 +50,6 @@ input {
   min-height: 100vh;
 }
 
-/* SIDEBAR */
-
 .tabs {
   grid-column: 1;
   grid-row: 1 / span 2;
@@ -99,8 +97,6 @@ input {
   color: #8b5e2d;
   box-shadow: inset 0 0 0 1px rgba(155, 107, 51, 0.14);
 }
-
-/* HERO */
 
 .hero {
   grid-column: 2;
@@ -172,8 +168,6 @@ input {
   letter-spacing: -1px;
 }
 
-/* CONTENT */
-
 .layout {
   grid-column: 2;
   grid-row: 2;
@@ -230,7 +224,26 @@ input {
   line-height: 1.5;
 }
 
-/* BUTTONS */
+.production-sheet-head {
+  align-items: flex-start;
+}
+
+.production-date-display {
+  margin: 8px 0 2px;
+  color: var(--accent) !important;
+  font-weight: 800;
+  font-size: 16px !important;
+}
+
+.production-actions {
+  display: flex;
+  align-items: end;
+  gap: 14px;
+}
+
+.production-date-field {
+  min-width: 190px;
+}
 
 .btn {
   border: 0;
@@ -257,8 +270,6 @@ input {
   border: 1px solid var(--line);
   box-shadow: none;
 }
-
-/* RECIPE ROWS */
 
 .recipe-row {
   display: grid;
@@ -288,8 +299,6 @@ input {
 .tiny {
   font-size: 12px;
 }
-
-/* FORMS */
 
 .field {
   display: flex;
@@ -330,8 +339,6 @@ input {
   font-size: 13px;
 }
 
-/* GRIDS */
-
 .grid {
   display: grid;
   gap: 18px;
@@ -352,8 +359,6 @@ input {
 .span-two {
   grid-column: span 2;
 }
-
-/* STAT CARDS */
 
 .stat-card-content {
   display: flex;
@@ -381,8 +386,6 @@ input {
   letter-spacing: -1px;
   word-break: normal;
 }
-
-/* PROGRESS */
 
 .progress-wrap {
   background: white;
@@ -421,8 +424,6 @@ input {
   color: #b45309;
 }
 
-/* ALERTS */
-
 .notice {
   border-radius: 18px;
   padding: 16px;
@@ -456,8 +457,6 @@ input {
   color: #22c55e;
 }
 
-/* TABLES */
-
 .table-wrap {
   overflow: auto;
   border-radius: 20px;
@@ -490,8 +489,6 @@ tbody tr.alt {
   background: #fafafa;
 }
 
-/* SOFT PANELS */
-
 .soft-panel {
   background: var(--soft);
   border: 1px solid var(--line);
@@ -514,8 +511,6 @@ tbody tr.alt {
   margin-bottom: 12px;
   line-height: 1.5;
 }
-
-/* RECIPE SELECT */
 
 .recipe-select {
   border: 1px solid var(--line);
@@ -546,8 +541,6 @@ tbody tr.alt {
   gap: 12px;
   flex-wrap: wrap;
 }
-
-/* RESPONSIVE */
 
 @media (max-width: 1500px) {
   .two-col {
@@ -625,25 +618,207 @@ tbody tr.alt {
   .four {
     grid-template-columns: 1fr;
   }
+
+  .production-actions {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
 }
 
 @media print {
+  @page {
+    size: landscape;
+    margin: 0.35in;
+  }
+
+  body {
+    background: white !important;
+  }
+
   .tabs,
-  .btn {
+  .btn,
+  .production-date-field {
     display: none !important;
   }
 
   .page {
     display: block;
+    min-height: auto;
   }
 
-  .hero,
+  .hero {
+    padding: 0 0 12px;
+  }
+
+  .hero-inner {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .hero h1 {
+    font-size: 20px;
+    white-space: normal;
+  }
+
+  .hero p {
+    font-size: 10px;
+    margin-top: 4px;
+    max-width: 560px;
+  }
+
+  .eyebrow {
+    display: none;
+  }
+
+  .hero-stats {
+    margin-left: auto;
+    gap: 8px;
+  }
+
+  .hero-stats div {
+    min-width: 80px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    box-shadow: none;
+  }
+
+  .hero-stats p {
+    font-size: 9px;
+    margin-bottom: 3px;
+  }
+
+  .hero-stats strong {
+    font-size: 20px;
+  }
+
   .layout {
+    display: block;
     padding: 0;
   }
 
   .card {
     box-shadow: none;
     border: 0;
+    background: white;
+  }
+
+  .panel {
+    padding: 0;
+  }
+
+  .section-head {
+    margin-bottom: 12px;
+  }
+
+  .section-head h2,
+  .panel h2 {
+    font-size: 18px;
+  }
+
+  .section-head p,
+  .panel p {
+    font-size: 10px;
+    margin: 4px 0;
+  }
+
+  .production-date-display {
+    font-size: 12px !important;
+    margin: 4px 0;
+  }
+
+  .grid {
+    gap: 8px;
+  }
+
+  .production-stats-grid,
+  .four {
+    display: grid !important;
+    grid-template-columns: repeat(4, 1fr) !important;
+    margin-bottom: 10px;
+  }
+
+  .two {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    margin-bottom: 10px;
+  }
+
+  .stat-card {
+    break-inside: avoid;
+  }
+
+  .stat-card-content {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  .icon-badge {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+  }
+
+  .stat-value {
+    font-size: 17px;
+    margin: 0;
+  }
+
+  .small {
+    font-size: 9px;
+  }
+
+  .tiny {
+    font-size: 8px;
+  }
+
+  .soft-panel {
+    padding: 10px;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    break-inside: avoid;
+  }
+
+  .soft-panel h3 {
+    margin: 0 0 5px;
+    font-size: 13px;
+  }
+
+  .line-item {
+    padding: 5px 0;
+    font-size: 10px;
+  }
+
+  .pill {
+    padding: 7px;
+    margin-bottom: 5px;
+    font-size: 10px;
+    border-radius: 10px;
+  }
+
+  .table-wrap {
+    border-radius: 10px;
+    margin-bottom: 12px;
+    overflow: visible;
+  }
+
+  table {
+    page-break-inside: auto;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  th,
+  td {
+    padding: 6px 7px;
+    font-size: 9px;
   }
 }
