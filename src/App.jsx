@@ -186,11 +186,24 @@ function minutesToLabel(minutes) {
 
 function addMinutesToTime(time, minutes) {
   const [h, m] = time.split(":").map(Number);
+
   const base = h * 60 + m + Math.round(minutes);
+
   const dayMin = ((base % 1440) + 1440) % 1440;
-  const hh = String(Math.floor(dayMin / 60)).padStart(2, "0");
-  const mm = String(dayMin % 60).padStart(2, "0");
-  return `${hh}:${mm}`;
+
+  const hour24 = Math.floor(dayMin / 60);
+  const minute = dayMin % 60;
+
+  const ampm = hour24 >= 12 ? "PM" : "AM";
+
+  let hour12 = hour24 % 12;
+
+  if (hour12 === 0) hour12 = 12;
+
+  const hh = String(hour12);
+  const mm = String(minute).padStart(2, "0");
+
+  return `${hh}:${mm} ${ampm}`;
 }
 
 function tempFermentationFactor(tempF, baselineF) {
