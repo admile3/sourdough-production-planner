@@ -46,6 +46,7 @@ const initialRecipes = [
     name: "Rustic Sourdough Loaf",
     category: "Loaf",
     unitsLabel: "loaves",
+    vesselType: "Banneton / Dutch Oven",
     finishedUnitWeight: 680,
     bakeLossPct: 12,
     batchMaxDoughG: 7200,
@@ -77,6 +78,7 @@ const initialRecipes = [
     name: "Ciabatta",
     category: "High Hydration",
     unitsLabel: "pieces",
+    vesselType: "Sheet Pan",
     finishedUnitWeight: 280,
     bakeLossPct: 14,
     batchMaxDoughG: 6500,
@@ -105,6 +107,7 @@ const initialRecipes = [
     name: "Sourdough Baguette",
     category: "Baguette",
     unitsLabel: "baguettes",
+    vesselType: "Baguette Tray / Stone",
     finishedUnitWeight: 300,
     bakeLossPct: 13,
     batchMaxDoughG: 6000,
@@ -133,6 +136,7 @@ const initialRecipes = [
     name: "Sourdough Sandwich Loaf",
     category: "Pan Loaf",
     unitsLabel: "loaves",
+    vesselType: "Sandwich Loaf Pan",
     finishedUnitWeight: 720,
     bakeLossPct: 10,
     batchMaxDoughG: 7800,
@@ -584,6 +588,19 @@ function NumberInput({ label, value, onChange, suffix, min = 0, step = "any" }) 
   );
 }
 
+function TextInput({ label, value, onChange, placeholder = "" }) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
+  );
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState("planner");
   const [recipes, setRecipes] = useState(initialRecipes);
@@ -720,6 +737,105 @@ export default function App() {
     );
   }
 
+  function updateFlourType(index, field, value) {
+    setRecipes((prev) =>
+      prev.map((recipe) => {
+        if (recipe.id !== selectedRecipe.id) return recipe;
+
+        const flourTypes = recipe.flourTypes.map((item, itemIndex) =>
+          itemIndex === index
+            ? {
+                ...item,
+                [field]: field === "pct" ? Number(value) : value,
+              }
+            : item
+        );
+
+        return { ...recipe, flourTypes };
+      })
+    );
+  }
+
+  function addFlourType() {
+    setRecipes((prev) =>
+      prev.map((recipe) =>
+        recipe.id === selectedRecipe.id
+          ? {
+              ...recipe,
+              flourTypes: [...recipe.flourTypes, { name: "New Flour", pct: 0 }],
+            }
+          : recipe
+      )
+    );
+  }
+
+  function deleteFlourType(index) {
+    setRecipes((prev) =>
+      prev.map((recipe) => {
+        if (recipe.id !== selectedRecipe.id) return recipe;
+
+        const flourTypes = recipe.flourTypes.filter((_, itemIndex) => itemIndex !== index);
+
+        return {
+          ...recipe,
+          flourTypes: flourTypes.length
+            ? flourTypes
+            : [{ name: "Bread Flour", pct: 100 }],
+        };
+      })
+    );
+  }
+
+  function updateOtherIngredient(index, field, value) {
+    setRecipes((prev) =>
+      prev.map((recipe) => {
+        if (recipe.id !== selectedRecipe.id) return recipe;
+
+        const otherIngredients = recipe.otherIngredients.map((item, itemIndex) =>
+          itemIndex === index
+            ? {
+                ...item,
+                [field]: field === "pct" ? Number(value) : value,
+              }
+            : item
+        );
+
+        return { ...recipe, otherIngredients };
+      })
+    );
+  }
+
+  function addOtherIngredient() {
+    setRecipes((prev) =>
+      prev.map((recipe) =>
+        recipe.id === selectedRecipe.id
+          ? {
+              ...recipe,
+              otherIngredients: [
+                ...recipe.otherIngredients,
+                { name: "New Ingredient", pct: 1 },
+              ],
+            }
+          : recipe
+      )
+    );
+  }
+
+  function deleteOtherIngredient(index) {
+    setRecipes((prev) =>
+      prev.map((recipe) =>
+        recipe.id === selectedRecipe.id
+          ? {
+              ...recipe,
+              otherIngredients: recipe.otherIngredients.filter(
+                (_, itemIndex) => itemIndex !== index
+              ),
+            }
+          : recipe
+      )
+    );
+  }
+
   function addRecipe() {
     const id = `recipe-${Date.now()}`;
     const base = {
@@ -727,6 +843,8 @@ export default function App() {
       id,
       name: "New Sourdough Product",
       category: "Custom",
+      unitsLabel: "units",
+      vesselType: "Tray / Pan",
       flourTypes: [{ name: "Bread Flour", pct: 100 }],
       otherIngredients: [],
     };
@@ -822,8 +940,7 @@ export default function App() {
                           <p className="muted small">
                             {recipe.finishedUnitWeight}g finished weight •{" "}
                             {recipe.hydrationPct}% base hydration •{" "}
-                            {recipe.starterPct}% starter • oven holds{" "}
-                            {recipe.ovenCapacityUnits} {recipe.unitsLabel}
+                            {recipe.starterPct}% starter • {recipe.vesselType}
                           </p>
                         </div>
                         <NumberInput
@@ -988,7 +1105,9 @@ export default function App() {
                   <div>
                     <h2>Edit Recipe</h2>
                     <p>
-                      Use baker’s percentages so every product scales cleanly.
+                      Build the full recipe formula, including flour types,
+                      added ingredients, dish type, yield, timing, and oven
+                      capacity.
                     </p>
                   </div>
                   <div className="button-row">
@@ -1015,6 +1134,27 @@ export default function App() {
                     />
                   </label>
 
+                  <TextInput
+                    label="Category"
+                    value={selectedRecipe.category}
+                    onChange={(v) => updateRecipeField("category", v)}
+                    placeholder="Loaf, Cookie, Muffin, Pastry, etc."
+                  />
+
+                  <TextInput
+                    label="Unit Label"
+                    value={selectedRecipe.unitsLabel}
+                    onChange={(v) => updateRecipeField("unitsLabel", v)}
+                    placeholder="loaves, cookies, pieces, trays"
+                  />
+
+                  <TextInput
+                    label="Dish / Vessel Type"
+                    value={selectedRecipe.vesselType || ""}
+                    onChange={(v) => updateRecipeField("vesselType", v)}
+                    placeholder="Loaf pan, sheet pan, banneton, muffin tin"
+                  />
+
                   <NumberInput
                     label="Finished Unit Weight"
                     value={selectedRecipe.finishedUnitWeight}
@@ -1023,6 +1163,7 @@ export default function App() {
                     }
                     suffix="g"
                   />
+
                   <NumberInput
                     label="Bake Loss"
                     value={selectedRecipe.bakeLossPct}
@@ -1054,7 +1195,7 @@ export default function App() {
                     suffix="%"
                   />
                   <NumberInput
-                    label="Max Dough Per Batch"
+                    label="Max Dough Per Mixer Batch"
                     value={selectedRecipe.batchMaxDoughG}
                     onChange={(v) =>
                       updateRecipeField("batchMaxDoughG", Number(v))
@@ -1069,6 +1210,97 @@ export default function App() {
                     }
                     suffix={selectedRecipe.unitsLabel}
                   />
+                </div>
+
+                <div className="soft-panel">
+                  <div className="section-head">
+                    <div>
+                      <h3>Flour Formula</h3>
+                      <p className="muted small">
+                        These percentages should usually total 100%.
+                      </p>
+                    </div>
+                    <Button onClick={addFlourType}>
+                      <Plus size={16} /> Add Flour
+                    </Button>
+                  </div>
+
+                  <div className="stack">
+                    {selectedRecipe.flourTypes.map((flour, index) => (
+                      <div key={`${flour.name}-${index}`} className="recipe-row">
+                        <TextInput
+                          label="Flour Name"
+                          value={flour.name}
+                          onChange={(v) => updateFlourType(index, "name", v)}
+                        />
+                        <NumberInput
+                          label="Percent"
+                          value={flour.pct}
+                          onChange={(v) => updateFlourType(index, "pct", v)}
+                          suffix="%"
+                        />
+                        <Button
+                          variant="outline"
+                          onClick={() => deleteFlourType(index)}
+                        >
+                          <Trash2 size={16} /> Remove
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="soft-panel">
+                  <div className="section-head">
+                    <div>
+                      <h3>Added Ingredients</h3>
+                      <p className="muted small">
+                        Add ingredients as baker’s percentages based on total
+                        flour weight. Examples: chocolate chips, olive oil,
+                        honey, butter, milk powder, herbs, seeds.
+                      </p>
+                    </div>
+                    <Button onClick={addOtherIngredient}>
+                      <Plus size={16} /> Add Ingredient
+                    </Button>
+                  </div>
+
+                  <div className="stack">
+                    {selectedRecipe.otherIngredients.length === 0 && (
+                      <p className="muted small">
+                        No added ingredients yet.
+                      </p>
+                    )}
+
+                    {selectedRecipe.otherIngredients.map((ingredient, index) => (
+                      <div
+                        key={`${ingredient.name}-${index}`}
+                        className="recipe-row"
+                      >
+                        <TextInput
+                          label="Ingredient Name"
+                          value={ingredient.name}
+                          onChange={(v) =>
+                            updateOtherIngredient(index, "name", v)
+                          }
+                        />
+                        <NumberInput
+                          label="Percent"
+                          value={ingredient.pct}
+                          onChange={(v) =>
+                            updateOtherIngredient(index, "pct", v)
+                          }
+                          suffix="%"
+                        />
+                        <Button
+                          variant="outline"
+                          onClick={() => deleteOtherIngredient(index)}
+                        >
+                          <Trash2 size={16} /> Remove
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 <div>
@@ -1121,6 +1353,20 @@ export default function App() {
                       value={selectedRecipe.process.foldCount}
                       onChange={(v) => updateRecipeProcess("foldCount", v)}
                       suffix="folds"
+                    />
+                    <NumberInput
+                      label="Fold Interval"
+                      value={selectedRecipe.process.foldIntervalMin}
+                      onChange={(v) =>
+                        updateRecipeProcess("foldIntervalMin", v)
+                      }
+                      suffix="min"
+                    />
+                    <NumberInput
+                      label="Bench Rest"
+                      value={selectedRecipe.process.benchRestMin}
+                      onChange={(v) => updateRecipeProcess("benchRestMin", v)}
+                      suffix="min"
                     />
                   </div>
                 </div>
@@ -1363,6 +1609,7 @@ export default function App() {
                         <th>Qty</th>
                         <th>Total Dough</th>
                         <th>Mixer Batches</th>
+                        <th>Dish / Vessel</th>
                         <th>Oven Capacity</th>
                         <th>Oven Loads</th>
                         <th>Bulk</th>
@@ -1379,6 +1626,7 @@ export default function App() {
                           <td>{plan.quantity}</td>
                           <td>{round(plan.doughWeight)}g</td>
                           <td>{plan.batchesByMixer}</td>
+                          <td>{plan.recipe.vesselType || ""}</td>
                           <td>
                             {plan.recipeOvenCapacity} {plan.recipe.unitsLabel}
                           </td>
@@ -1406,8 +1654,8 @@ export default function App() {
                   <h2>Permanent Settings</h2>
                   <p>
                     These stay saved as assumptions for your regular bake location
-                    and equipment. Recipe-specific oven capacity is now handled
-                    inside each recipe.
+                    and equipment. Recipe-specific oven capacity and dish type
+                    are handled inside each recipe.
                   </p>
                 </div>
 
