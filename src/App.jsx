@@ -66,7 +66,10 @@ const initialRecipes = [
       bulkMin: 300,
       foldCount: 4,
       foldIntervalMin: 30,
+      foldDurationMin: 5,
+      divideAndPreshapeMin: 12,
       benchRestMin: 20,
+      finalShapeMin: 18,
       finalProofMin: 180,
       bakeTempF: 475,
       bakeMin: 42,
@@ -95,7 +98,10 @@ const initialRecipes = [
       bulkMin: 240,
       foldCount: 4,
       foldIntervalMin: 25,
+      foldDurationMin: 5,
+      divideAndPreshapeMin: 0,
       benchRestMin: 0,
+      finalShapeMin: 12,
       finalProofMin: 60,
       bakeTempF: 460,
       bakeMin: 24,
@@ -124,7 +130,10 @@ const initialRecipes = [
       bulkMin: 210,
       foldCount: 3,
       foldIntervalMin: 30,
+      foldDurationMin: 5,
+      divideAndPreshapeMin: 10,
       benchRestMin: 20,
+      finalShapeMin: 20,
       finalProofMin: 75,
       bakeTempF: 480,
       bakeMin: 22,
@@ -157,7 +166,10 @@ const initialRecipes = [
       bulkMin: 240,
       foldCount: 2,
       foldIntervalMin: 35,
+      foldDurationMin: 5,
+      divideAndPreshapeMin: 8,
       benchRestMin: 15,
+      finalShapeMin: 12,
       finalProofMin: 150,
       bakeTempF: 385,
       bakeMin: 38,
@@ -271,7 +283,32 @@ function altitudeBakeAdjustment(altitudeFt) {
   return { tempF: 15, timePct: 10, hydrationPct: 1.5 };
 }
 
-function calculateRecipePlan(recipe, quantity, env, settings) {
+function normalizeRecipe(recipe) {
+  return {
+    ...recipe,
+    flourTypes: recipe.flourTypes || [{ name: "Bread Flour", pct: 100 }],
+    otherIngredients: recipe.otherIngredients || [],
+    process: {
+      autolyseMin: 0,
+      mixMin: 0,
+      bulkMin: 0,
+      foldCount: 0,
+      foldIntervalMin: 30,
+      foldDurationMin: 5,
+      divideAndPreshapeMin: 12,
+      benchRestMin: 0,
+      finalShapeMin: 10,
+      finalProofMin: 0,
+      bakeTempF: 400,
+      bakeMin: 30,
+      coolMin: 60,
+      ...(recipe.process || {}),
+    },
+  };
+}
+
+function calculateRecipePlan(rawRecipe, quantity, env, settings) {
+  const recipe = normalizeRecipe(rawRecipe);
   const qty = Number(quantity) || 0;
   const desiredBakedWeight = qty * recipe.finishedUnitWeight;
   const doughWeight = desiredBakedWeight / (1 - recipe.bakeLossPct / 100);
@@ -330,7 +367,9 @@ function calculateRecipePlan(recipe, quantity, env, settings) {
     recipe.process.autolyseMin +
     recipe.process.mixMin +
     bulkMin +
+    recipe.process.divideAndPreshapeMin +
     recipe.process.benchRestMin +
+    recipe.process.finalShapeMin +
     finalProofMin +
     bakeMin * ovenLoads +
     recipe.process.coolMin;
@@ -527,6 +566,7 @@ function buildProductionSchedule(plans, settings) {
     const process = plan.recipe.process;
     const foldCount = Number(process.foldCount) || 0;
     const foldInterval = Number(process.foldIntervalMin) || 30;
+    const foldDuration = Number(process.foldDurationMin) || 5;
 
     for (let i = 1; i <= foldCount; i++) {
       const targetStart = state.bulkStart + i * foldInterval;
@@ -535,7 +575,7 @@ function buildProductionSchedule(plans, settings) {
         plan,
         name: `Fold ${i}`,
         earliestStart: targetStart,
-        duration: 5,
+        duration: foldDuration,
       });
     }
   });
@@ -568,37 +608,47 @@ function buildProductionSchedule(plans, settings) {
 
     let current = state.readyForShapeAt;
 
-    if ((Number(process.benchRestMin) || 0) > 0) {
+    const divideAndPreshapeMin = Number(process.divideAndPreshapeMin) || 0;
+
+    if (divideAndPreshapeMin > 0) {
       const divideTask = scheduleBakerTask({
         plan,
         name: "Divide and pre-shape",
         earliestStart: current,
-        duration: 12,
+        duration: divideAndPreshapeMin,
         note: "",
       });
 
       current = divideTask.end;
+    }
 
+    const benchRestMin = Number(process.benchRestMin) || 0;
+
+    if (benchRestMin > 0) {
       schedulePassiveTask({
         plan,
         name: "Bench rest",
         start: current,
-        duration: Number(process.benchRestMin) || 0,
+        duration: benchRestMin,
         note: "",
       });
 
-      current += Number(process.benchRestMin) || 0;
+      current += benchRestMin;
     }
 
-    const shapeTask = scheduleBakerTask({
-      plan,
-      name: "Final shape",
-      earliestStart: current,
-      duration: Math.max(10, plan.quantity * 2),
-      note: "",
-    });
+    const finalShapeMin = Number(process.finalShapeMin) || 0;
 
-    current = shapeTask.end;
+    if (finalShapeMin > 0) {
+      const shapeTask = scheduleBakerTask({
+        plan,
+        name: "Final shape",
+        earliestStart: current,
+        duration: finalShapeMin,
+        note: "",
+      });
+
+      current = shapeTask.end;
+    }
 
     schedulePassiveTask({
       plan,
@@ -733,7 +783,7 @@ function TextInput({ label, value, onChange, placeholder = "" }) {
 export default function App() {
   const [activeTab, setActiveTab] = useState("planner");
   const [recipes, setRecipes] = useState(() =>
-    loadFromStorage("sourdoughPlannerRecipes", initialRecipes)
+    loadFromStorage("sourdoughPlannerRecipes", initialRecipes).map(normalizeRecipe)
   );
   const [settings, setSettings] = useState(() =>
     loadFromStorage("sourdoughPlannerSettings", defaultSettings)
@@ -874,7 +924,7 @@ export default function App() {
   }, [recipes, productionItems]);
 
   function savePlannerData() {
-    saveToStorage("sourdoughPlannerRecipes", recipes);
+    saveToStorage("sourdoughPlannerRecipes", recipes.map(normalizeRecipe));
     saveToStorage("sourdoughPlannerSettings", settings);
     saveToStorage("sourdoughPlannerEnv", env);
     saveToStorage("sourdoughPlannerProductionDate", productionDate);
@@ -898,7 +948,7 @@ export default function App() {
     setRecipes((prev) =>
       prev.map((r) =>
         r.id === selectedRecipe.id
-          ? { ...r, process: { ...r.process, [field]: Number(value) || 0 } }
+          ? { ...r, process: { ...normalizeRecipe(r).process, [field]: Number(value) || 0 } }
           : r
       )
     );
@@ -1032,7 +1082,7 @@ export default function App() {
 
   function addRecipe() {
     const id = `recipe-${Date.now()}`;
-    const base = {
+    const base = normalizeRecipe({
       ...initialRecipes[0],
       id,
       name: "New Recipe",
@@ -1041,7 +1091,7 @@ export default function App() {
       vesselType: "Tray / Pan",
       flourTypes: [{ name: "Bread Flour", pct: 100 }],
       otherIngredients: [],
-    };
+    });
     setRecipes((prev) => [...prev, base]);
     setSelectedRecipeId(id);
     setActiveTab("recipes");
@@ -1051,7 +1101,7 @@ export default function App() {
     const id = `${selectedRecipe.id}-copy-${Date.now()}`;
     setRecipes((prev) => [
       ...prev,
-      { ...selectedRecipe, id, name: `${selectedRecipe.name} Copy` },
+      normalizeRecipe({ ...selectedRecipe, id, name: `${selectedRecipe.name} Copy` }),
     ]);
     setSelectedRecipeId(id);
   }
@@ -1429,6 +1479,7 @@ export default function App() {
                     }
                     suffix="%"
                   />
+
                   <NumberInput
                     label="Base Hydration"
                     value={selectedRecipe.hydrationPct}
@@ -1437,6 +1488,7 @@ export default function App() {
                     }
                     suffix="%"
                   />
+
                   <NumberInput
                     label="Starter / Levain"
                     value={selectedRecipe.starterPct}
@@ -1445,12 +1497,14 @@ export default function App() {
                     }
                     suffix="%"
                   />
+
                   <NumberInput
                     label="Salt"
                     value={selectedRecipe.saltPct}
                     onChange={(v) => updateRecipeField("saltPct", Number(v))}
                     suffix="%"
                   />
+
                   <NumberInput
                     label="Max Dough Per Mixer Batch"
                     value={selectedRecipe.batchMaxDoughG}
@@ -1459,6 +1513,7 @@ export default function App() {
                     }
                     suffix="g"
                   />
+
                   <NumberInput
                     label="Oven Capacity Per Load"
                     value={selectedRecipe.ovenCapacityUnits}
@@ -1582,6 +1637,48 @@ export default function App() {
                       suffix="min"
                     />
                     <NumberInput
+                      label="Fold Count"
+                      value={selectedRecipe.process.foldCount}
+                      onChange={(v) => updateRecipeProcess("foldCount", v)}
+                      suffix="folds"
+                    />
+                    <NumberInput
+                      label="Fold Interval"
+                      value={selectedRecipe.process.foldIntervalMin}
+                      onChange={(v) =>
+                        updateRecipeProcess("foldIntervalMin", v)
+                      }
+                      suffix="min"
+                    />
+                    <NumberInput
+                      label="Fold Duration"
+                      value={selectedRecipe.process.foldDurationMin}
+                      onChange={(v) =>
+                        updateRecipeProcess("foldDurationMin", v)
+                      }
+                      suffix="min"
+                    />
+                    <NumberInput
+                      label="Divide / Pre-shape"
+                      value={selectedRecipe.process.divideAndPreshapeMin}
+                      onChange={(v) =>
+                        updateRecipeProcess("divideAndPreshapeMin", v)
+                      }
+                      suffix="min"
+                    />
+                    <NumberInput
+                      label="Bench Rest"
+                      value={selectedRecipe.process.benchRestMin}
+                      onChange={(v) => updateRecipeProcess("benchRestMin", v)}
+                      suffix="min"
+                    />
+                    <NumberInput
+                      label="Final Shape"
+                      value={selectedRecipe.process.finalShapeMin}
+                      onChange={(v) => updateRecipeProcess("finalShapeMin", v)}
+                      suffix="min"
+                    />
+                    <NumberInput
                       label="Final Proof"
                       value={selectedRecipe.process.finalProofMin}
                       onChange={(v) => updateRecipeProcess("finalProofMin", v)}
@@ -1603,26 +1700,6 @@ export default function App() {
                       label="Cool Time"
                       value={selectedRecipe.process.coolMin}
                       onChange={(v) => updateRecipeProcess("coolMin", v)}
-                      suffix="min"
-                    />
-                    <NumberInput
-                      label="Fold Count"
-                      value={selectedRecipe.process.foldCount}
-                      onChange={(v) => updateRecipeProcess("foldCount", v)}
-                      suffix="folds"
-                    />
-                    <NumberInput
-                      label="Fold Interval"
-                      value={selectedRecipe.process.foldIntervalMin}
-                      onChange={(v) =>
-                        updateRecipeProcess("foldIntervalMin", v)
-                      }
-                      suffix="min"
-                    />
-                    <NumberInput
-                      label="Bench Rest"
-                      value={selectedRecipe.process.benchRestMin}
-                      onChange={(v) => updateRecipeProcess("benchRestMin", v)}
                       suffix="min"
                     />
                   </div>
