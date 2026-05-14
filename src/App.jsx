@@ -184,26 +184,23 @@ function minutesToLabel(minutes) {
   return `${h} hr ${m} min`;
 }
 
-function addMinutesToTime(time, minutes) {
+function timeToMinutes(time) {
   const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
 
-  const base = h * 60 + m + Math.round(minutes);
-
-  const dayMin = ((base % 1440) + 1440) % 1440;
-
+function minutesToClock(totalMinutes) {
+  const dayMin = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
   const hour24 = Math.floor(dayMin / 60);
   const minute = dayMin % 60;
-
   const ampm = hour24 >= 12 ? "PM" : "AM";
-
   let hour12 = hour24 % 12;
-
   if (hour12 === 0) hour12 = 12;
+  return `${hour12}:${String(minute).padStart(2, "0")} ${ampm}`;
+}
 
-  const hh = String(hour12);
-  const mm = String(minute).padStart(2, "0");
-
-  return `${hh}:${mm} ${ampm}`;
+function addMinutesToTime(time, minutes) {
+  return minutesToClock(timeToMinutes(time) + Math.round(minutes));
 }
 
 function tempFermentationFactor(tempF, baselineF) {
@@ -250,7 +247,6 @@ function calculateRecipePlan(recipe, quantity, env, settings) {
     100 + adjustedHydrationPct + recipe.starterPct + recipe.saltPct + otherPct;
 
   const baseFlourG = doughWeight / (formulaTotalPct / 100);
-
   const starterG = (baseFlourG * recipe.starterPct) / 100;
   const waterG = (baseFlourG * adjustedHydrationPct) / 100;
   const saltG = (baseFlourG * recipe.saltPct) / 100;
@@ -315,6 +311,180 @@ function calculateRecipePlan(recipe, quantity, env, settings) {
     ovenLoads,
     totalProcessMin,
   };
+}
+
+function buildProductionSchedule(plans, settings) {
+  const startMin = timeToMinutes(settings.defaultStartTime || "06:00");
+
+  let mixerAvailableAt = startMin;
+  let bakerAvailableAt = startMin;
+  let ovenAvailableAt = startMin;
+
+  const schedule = [];
+
+  const sortedPlans = [...plans].sort((a, b) => {
+    return b.totalProcessMin - a.totalProcessMin;
+  });
+
+  sortedPlans.forEach((plan) => {
+    const product = plan.recipe.name;
+    const qty = plan.quantity;
+    const process = plan.recipe.process;
+
+    const addTask = ({ name, duration, earliestStart, resource = "passive", note = "" }) => {
+      let start = earliestStart;
+
+      if (resource === "mixer") {
+        start = Math.max(start, mixerAvailableAt, bakerAvailableAt);
+        mixerAvailableAt = start + duration;
+        bakerAvailableAt = start + duration;
+      }
+
+      if (resource === "baker") {
+        start = Math.max(start, bakerAvailableAt);
+        bakerAvailableAt = start + duration;
+      }
+
+      if (resource === "oven") {
+        start = Math.max(start, ovenAvailableAt, bakerAvailableAt);
+        ovenAvailableAt = start + duration;
+        bakerAvailableAt = start + Math.min(duration, 8);
+      }
+
+      const end = start + duration;
+
+      schedule.push({
+        product,
+        qty,
+        name,
+        resource,
+        start,
+        end,
+        duration,
+        note,
+      });
+
+      return end;
+    };
+
+    let current = startMin;
+
+    if (process.autolyseMin > 0) {
+      current = addTask({
+        name: "Start autolyse",
+        duration: process.autolyseMin,
+        earliestStart: current,
+        resource: "baker",
+        note: `${qty} units`,
+      });
+    }
+
+    current = addTask({
+      name: "Mix dough",
+      duration: process.mixMin,
+      earliestStart: current,
+      resource: "mixer",
+      note: `${Math.round(plan.doughWeight)}g dough`,
+    });
+
+    const bulkStart = current;
+    const bulkEnd = bulkStart + plan.bulkMin;
+
+    schedule.push({
+      product,
+      qty,
+      name: "Bulk fermentation",
+      resource: "passive",
+      start: bulkStart,
+      end: bulkEnd,
+      duration: plan.bulkMin,
+      note: `${minutesToLabel(plan.bulkMin)}`,
+    });
+
+    const foldCount = process.foldCount || 0;
+    const foldInterval = process.foldIntervalMin || 30;
+
+    for (let i = 1; i <= foldCount; i++) {
+      const foldStartTarget = bulkStart + i * foldInterval;
+
+      addTask({
+        name: `Fold ${i}`,
+        duration: 5,
+        earliestStart: foldStartTarget,
+        resource: "baker",
+        note: product,
+      });
+    }
+
+    current = bulkEnd;
+
+    if (process.benchRestMin > 0) {
+      current = addTask({
+        name: "Divide and pre-shape",
+        duration: 12,
+        earliestStart: current,
+        resource: "baker",
+        note: `${qty} units`,
+      });
+
+      schedule.push({
+        product,
+        qty,
+        name: "Bench rest",
+        resource: "passive",
+        start: current,
+        end: current + process.benchRestMin,
+        duration: process.benchRestMin,
+        note: `${minutesToLabel(process.benchRestMin)}`,
+      });
+
+      current += process.benchRestMin;
+    }
+
+    current = addTask({
+      name: "Final shape",
+      duration: Math.max(10, qty * 2),
+      earliestStart: current,
+      resource: "baker",
+      note: `${qty} units`,
+    });
+
+    schedule.push({
+      product,
+      qty,
+      name: "Final proof",
+      resource: "passive",
+      start: current,
+      end: current + plan.finalProofMin,
+      duration: plan.finalProofMin,
+      note: `${minutesToLabel(plan.finalProofMin)}`,
+    });
+
+    current += plan.finalProofMin;
+
+    for (let load = 1; load <= plan.ovenLoads; load++) {
+      current = addTask({
+        name: plan.ovenLoads > 1 ? `Bake load ${load}` : "Bake",
+        duration: plan.bakeMin,
+        earliestStart: current,
+        resource: "oven",
+        note: `${Math.round(plan.bakeTempF)}°F`,
+      });
+    }
+
+    schedule.push({
+      product,
+      qty,
+      name: "Cool",
+      resource: "passive",
+      start: current,
+      end: current + process.coolMin,
+      duration: process.coolMin,
+      note: `${minutesToLabel(process.coolMin)}`,
+    });
+  });
+
+  return schedule.sort((a, b) => a.start - b.start);
 }
 
 function StatCard({ icon: Icon, label, value, sub }) {
@@ -397,6 +567,10 @@ export default function App() {
       )
       .filter((plan) => plan.quantity > 0);
   }, [recipes, quantities, env, settings]);
+
+  const productionSchedule = useMemo(() => {
+    return buildProductionSchedule(plans, settings);
+  }, [plans, settings]);
 
   const totals = useMemo(() => {
     const flourMap = {};
@@ -700,7 +874,7 @@ export default function App() {
                 icon={Clock}
                 label="Longest Product Window"
                 value={minutesToLabel(totals.maxProcess)}
-                sub={`starting near ${settings.defaultStartTime}`}
+                sub={`starting near ${addMinutesToTime(settings.defaultStartTime, 0)}`}
               />
               <StatCard
                 icon={Mountain}
@@ -975,147 +1149,165 @@ export default function App() {
         )}
 
         {activeTab === "sheet" && (
-          <Card>
-            <CardContent className="panel">
-              <div className="section-head">
-                <div>
-                  <h2>Bake Day Production Sheet</h2>
-                  <p>
-                    Generated from current recipes, quantities, conditions, and
-                    settings.
-                  </p>
-                </div>
-                <Button onClick={() => window.print()}>
-                  <Printer size={16} /> Print
-                </Button>
-              </div>
-
-              <div className="grid four">
-                <StatCard
-                  icon={Scale}
-                  label="Total Dough"
-                  value={`${round(totals.doughWeight / 1000, 2)} kg`}
-                />
-                <StatCard
-                  icon={ChefHat}
-                  label="Finished Units"
-                  value={round(totals.units)}
-                />
-                <StatCard
-                  icon={Thermometer}
-                  label="Room Temp"
-                  value={`${env.tempF}°F`}
-                />
-                <StatCard
-                  icon={Droplets}
-                  label="Humidity"
-                  value={`${env.humidityPct}%`}
-                />
-              </div>
-
-              <div className="grid two">
-                <div className="soft-panel">
-                  <h3>Ingredient Pull List</h3>
+          <div className="layout">
+            <Card>
+              <CardContent className="panel">
+                <div className="section-head">
                   <div>
-                    {Object.entries(totals.bufferedFlourMap).map(
-                      ([name, grams]) => (
+                    <h2>Bake Day Production Sheet</h2>
+                    <p>
+                      Generated from current recipes, quantities, conditions, and
+                      settings.
+                    </p>
+                  </div>
+                  <Button onClick={() => window.print()}>
+                    <Printer size={16} /> Print
+                  </Button>
+                </div>
+
+                <div className="grid four">
+                  <StatCard
+                    icon={Scale}
+                    label="Total Dough"
+                    value={`${round(totals.doughWeight / 1000, 2)} kg`}
+                  />
+                  <StatCard
+                    icon={ChefHat}
+                    label="Finished Units"
+                    value={round(totals.units)}
+                  />
+                  <StatCard
+                    icon={Thermometer}
+                    label="Room Temp"
+                    value={`${env.tempF}°F`}
+                  />
+                  <StatCard
+                    icon={Droplets}
+                    label="Humidity"
+                    value={`${env.humidityPct}%`}
+                  />
+                </div>
+
+                <div className="grid two">
+                  <div className="soft-panel">
+                    <h3>Ingredient Pull List</h3>
+                    <div>
+                      {Object.entries(totals.bufferedFlourMap).map(
+                        ([name, grams]) => (
+                          <div key={name} className="line-item">
+                            <span>{name}</span>
+                            <strong>{round(grams)} g</strong>
+                          </div>
+                        )
+                      )}
+                      <div className="line-item">
+                        <span>Water</span>
+                        <strong>{round(totals.bufferedWaterG)} g</strong>
+                      </div>
+                      <div className="line-item">
+                        <span>Mature Starter / Levain</span>
+                        <strong>{round(totals.bufferedStarterG)} g</strong>
+                      </div>
+                      <div className="line-item">
+                        <span>Salt</span>
+                        <strong>{round(totals.bufferedSaltG)} g</strong>
+                      </div>
+                      {Object.entries(totals.otherMap).map(([name, grams]) => (
                         <div key={name} className="line-item">
                           <span>{name}</span>
-                          <strong>{round(grams)} g</strong>
+                          <strong>
+                            {round(grams * (1 + settings.ingredientBufferPct / 100))} g
+                          </strong>
                         </div>
-                      )
-                    )}
-                    <div className="line-item">
-                      <span>Water</span>
-                      <strong>{round(totals.bufferedWaterG)} g</strong>
+                      ))}
                     </div>
-                    <div className="line-item">
-                      <span>Mature Starter / Levain</span>
-                      <strong>{round(totals.bufferedStarterG)} g</strong>
-                    </div>
-                    <div className="line-item">
-                      <span>Salt</span>
-                      <strong>{round(totals.bufferedSaltG)} g</strong>
-                    </div>
-                    {Object.entries(totals.otherMap).map(([name, grams]) => (
-                      <div key={name} className="line-item">
-                        <span>{name}</span>
-                        <strong>
-                          {round(grams * (1 + settings.ingredientBufferPct / 100))} g
-                        </strong>
-                      </div>
-                    ))}
+                  </div>
+
+                  <div className="soft-panel">
+                    <h3>Environmental Adjustments</h3>
+                    <p className="pill">
+                      Fermentation timing factor:{" "}
+                      <strong>
+                        {round((plans[0]?.fermentationFactor || 1) * 100)}%
+                      </strong>{" "}
+                      of baseline.
+                    </p>
+                    <p className="pill">
+                      Humidity hydration adjustment:{" "}
+                      <strong>
+                        {plans[0]?.humidityAdj > 0 ? "+" : ""}
+                        {round(plans[0]?.humidityAdj || 0, 1)}%
+                      </strong>
+                      .
+                    </p>
+                    <p className="pill">
+                      Altitude adjustment:{" "}
+                      <strong>+{plans[0]?.altitudeAdj.tempF || 0}°F bake temp</strong>
+                      ,{" "}
+                      <strong>+{plans[0]?.altitudeAdj.timePct || 0}% bake time</strong>
+                      .
+                    </p>
                   </div>
                 </div>
 
                 <div className="soft-panel">
-                  <h3>Environmental Adjustments</h3>
-                  <p className="pill">
-                    Fermentation timing factor:{" "}
-                    <strong>
-                      {round((plans[0]?.fermentationFactor || 1) * 100)}%
-                    </strong>{" "}
-                    of baseline.
-                  </p>
-                  <p className="pill">
-                    Humidity hydration adjustment:{" "}
-                    <strong>
-                      {plans[0]?.humidityAdj > 0 ? "+" : ""}
-                      {round(plans[0]?.humidityAdj || 0, 1)}%
-                    </strong>
-                    .
-                  </p>
-                  <p className="pill">
-                    Altitude adjustment:{" "}
-                    <strong>+{plans[0]?.altitudeAdj.tempF || 0}°F bake temp</strong>
-                    ,{" "}
-                    <strong>+{plans[0]?.altitudeAdj.timePct || 0}% bake time</strong>
-                    .
+                  <h3>Resource-Aware Production Timeline</h3>
+                  <p className="muted small">
+                    This schedule prevents overlapping mixer, oven, and hands-on
+                    baker tasks. Passive fermentation, proofing, and cooling can
+                    overlap.
                   </p>
                 </div>
-              </div>
 
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Product</th>
-                      <th>Qty</th>
-                      <th>Dough</th>
-                      <th>Batches</th>
-                      <th>Bulk</th>
-                      <th>Proof</th>
-                      <th>Bake</th>
-                      <th>Suggested Timeline</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {plans.map((plan, idx) => {
-                      let t = 0;
-                      const start = settings.defaultStartTime;
-                      const mix = addMinutesToTime(
-                        start,
-                        t + plan.recipe.process.autolyseMin
-                      );
-                      t += plan.recipe.process.autolyseMin + plan.recipe.process.mixMin;
-                      const foldsEnd = addMinutesToTime(
-                        start,
-                        t +
-                          Math.min(
-                            plan.bulkMin,
-                            plan.recipe.process.foldCount *
-                              plan.recipe.process.foldIntervalMin
-                          )
-                      );
-                      t += plan.bulkMin;
-                      const shape = addMinutesToTime(
-                        start,
-                        t + plan.recipe.process.benchRestMin
-                      );
-                      t += plan.recipe.process.benchRestMin + plan.finalProofMin;
-                      const bake = addMinutesToTime(start, t);
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Start</th>
+                        <th>End</th>
+                        <th>Product</th>
+                        <th>Task</th>
+                        <th>Resource</th>
+                        <th>Duration</th>
+                        <th>Note</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {productionSchedule.map((task, idx) => (
+                        <tr
+                          key={`${task.product}-${task.name}-${idx}`}
+                          className={idx % 2 ? "" : "alt"}
+                        >
+                          <td>{minutesToClock(task.start)}</td>
+                          <td>{minutesToClock(task.end)}</td>
+                          <td>
+                            <strong>{task.product}</strong>
+                          </td>
+                          <td>{task.name}</td>
+                          <td>{task.resource}</td>
+                          <td>{minutesToLabel(task.duration)}</td>
+                          <td className="tiny">{task.note}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
 
-                      return (
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Product</th>
+                        <th>Qty</th>
+                        <th>Total Dough</th>
+                        <th>Batches</th>
+                        <th>Bulk</th>
+                        <th>Proof</th>
+                        <th>Bake</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {plans.map((plan, idx) => (
                         <tr key={plan.recipe.id} className={idx % 2 ? "" : "alt"}>
                           <td>
                             <strong>{plan.recipe.name}</strong>
@@ -1128,125 +1320,123 @@ export default function App() {
                           <td>
                             {round(plan.bakeTempF)}°F / {minutesToLabel(plan.bakeMin)}
                           </td>
-                          <td className="tiny">
-                            Mix {mix} • Folds done {foldsEnd} • Shape {shape} • Bake{" "}
-                            {bake}
-                          </td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         )}
 
         {activeTab === "settings" && (
-          <Card>
-            <CardContent className="panel">
-              <div>
-                <h2>Permanent Settings</h2>
-                <p>
-                  These stay saved as assumptions for your regular bake location
-                  and equipment.
-                </p>
-              </div>
+          <div className="layout">
+            <Card>
+              <CardContent className="panel">
+                <div>
+                  <h2>Permanent Settings</h2>
+                  <p>
+                    These stay saved as assumptions for your regular bake location
+                    and equipment.
+                  </p>
+                </div>
 
-              <div className="grid three">
-                <NumberInput
-                  label="Altitude"
-                  value={settings.altitudeFt}
-                  onChange={(v) =>
-                    setSettings((p) => ({ ...p, altitudeFt: Number(v) }))
-                  }
-                  suffix="ft"
-                />
-                <NumberInput
-                  label="Baseline Temperature"
-                  value={settings.baselineTempF}
-                  onChange={(v) =>
-                    setSettings((p) => ({ ...p, baselineTempF: Number(v) }))
-                  }
-                  suffix="°F"
-                />
-                <NumberInput
-                  label="Baseline Humidity"
-                  value={settings.baselineHumidityPct}
-                  onChange={(v) =>
-                    setSettings((p) => ({
-                      ...p,
-                      baselineHumidityPct: Number(v),
-                    }))
-                  }
-                  suffix="%"
-                />
-                <NumberInput
-                  label="Mixer Capacity"
-                  value={settings.mixerCapacityG}
-                  onChange={(v) =>
-                    setSettings((p) => ({ ...p, mixerCapacityG: Number(v) }))
-                  }
-                  suffix="g dough"
-                />
-                <NumberInput
-                  label="Oven Capacity"
-                  value={settings.ovenCapacityUnits}
-                  onChange={(v) =>
-                    setSettings((p) => ({
-                      ...p,
-                      ovenCapacityUnits: Number(v),
-                    }))
-                  }
-                  suffix="units"
-                />
-                <NumberInput
-                  label="Proofing Capacity"
-                  value={settings.proofingCapacityUnits}
-                  onChange={(v) =>
-                    setSettings((p) => ({
-                      ...p,
-                      proofingCapacityUnits: Number(v),
-                    }))
-                  }
-                  suffix="units"
-                />
-                <NumberInput
-                  label="Ingredient Buffer"
-                  value={settings.ingredientBufferPct}
-                  onChange={(v) =>
-                    setSettings((p) => ({
-                      ...p,
-                      ingredientBufferPct: Number(v),
-                    }))
-                  }
-                  suffix="%"
-                />
-                <label className="field">
-                  <span>Default Start Time</span>
-                  <input
-                    type="time"
-                    value={settings.defaultStartTime}
-                    onChange={(e) =>
+                <div className="grid three">
+                  <NumberInput
+                    label="Altitude"
+                    value={settings.altitudeFt}
+                    onChange={(v) =>
+                      setSettings((p) => ({ ...p, altitudeFt: Number(v) }))
+                    }
+                    suffix="ft"
+                  />
+                  <NumberInput
+                    label="Baseline Temperature"
+                    value={settings.baselineTempF}
+                    onChange={(v) =>
+                      setSettings((p) => ({ ...p, baselineTempF: Number(v) }))
+                    }
+                    suffix="°F"
+                  />
+                  <NumberInput
+                    label="Baseline Humidity"
+                    value={settings.baselineHumidityPct}
+                    onChange={(v) =>
                       setSettings((p) => ({
                         ...p,
-                        defaultStartTime: e.target.value,
+                        baselineHumidityPct: Number(v),
                       }))
                     }
+                    suffix="%"
                   />
-                </label>
-              </div>
-
-              <div className="soft-panel">
-                <div className="inline-head">
-                  <Save size={16} />
-                  <strong>Next build recommendation</strong>
+                  <NumberInput
+                    label="Mixer Capacity"
+                    value={settings.mixerCapacityG}
+                    onChange={(v) =>
+                      setSettings((p) => ({ ...p, mixerCapacityG: Number(v) }))
+                    }
+                    suffix="g dough"
+                  />
+                  <NumberInput
+                    label="Oven Capacity"
+                    value={settings.ovenCapacityUnits}
+                    onChange={(v) =>
+                      setSettings((p) => ({
+                        ...p,
+                        ovenCapacityUnits: Number(v),
+                      }))
+                    }
+                    suffix="units"
+                  />
+                  <NumberInput
+                    label="Proofing Capacity"
+                    value={settings.proofingCapacityUnits}
+                    onChange={(v) =>
+                      setSettings((p) => ({
+                        ...p,
+                        proofingCapacityUnits: Number(v),
+                      }))
+                    }
+                    suffix="units"
+                  />
+                  <NumberInput
+                    label="Ingredient Buffer"
+                    value={settings.ingredientBufferPct}
+                    onChange={(v) =>
+                      setSettings((p) => ({
+                        ...p,
+                        ingredientBufferPct: Number(v),
+                      }))
+                    }
+                    suffix="%"
+                  />
+                  <label className="field">
+                    <span>Default Start Time</span>
+                    <input
+                      type="time"
+                      value={settings.defaultStartTime}
+                      onChange={(e) =>
+                        setSettings((p) => ({
+                          ...p,
+                          defaultStartTime: e.target.value,
+                        }))
+                      }
+                    />
+                  </label>
                 </div>
-                Add browser local storage so recipes, settings, and production
-                history persist after refreshing. Then add Google Sheets syncing.
-              </div>
-            </CardContent>
-          </Card>
+
+                <div className="soft-panel">
+                  <div className="inline-head">
+                    <Save size={16} />
+                    <strong>Next build recommendation</strong>
+                  </div>
+                  Add Google Sheets syncing so recipes, settings, plans, and
+                  production history persist across computers.
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         )}
       </div>
     </div>
