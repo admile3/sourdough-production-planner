@@ -49,6 +49,7 @@ const initialRecipes = [
     finishedUnitWeight: 680,
     bakeLossPct: 12,
     batchMaxDoughG: 7200,
+    ovenCapacityUnits: 8,
     flourTypes: [
       { name: "Bread Flour", pct: 85 },
       { name: "Whole Wheat Flour", pct: 15 },
@@ -79,6 +80,7 @@ const initialRecipes = [
     finishedUnitWeight: 280,
     bakeLossPct: 14,
     batchMaxDoughG: 6500,
+    ovenCapacityUnits: 30,
     flourTypes: [{ name: "Bread Flour", pct: 100 }],
     hydrationPct: 88,
     starterPct: 18,
@@ -106,6 +108,7 @@ const initialRecipes = [
     finishedUnitWeight: 300,
     bakeLossPct: 13,
     batchMaxDoughG: 6000,
+    ovenCapacityUnits: 18,
     flourTypes: [{ name: "Bread Flour", pct: 100 }],
     hydrationPct: 72,
     starterPct: 20,
@@ -133,6 +136,7 @@ const initialRecipes = [
     finishedUnitWeight: 720,
     bakeLossPct: 10,
     batchMaxDoughG: 7800,
+    ovenCapacityUnits: 12,
     flourTypes: [{ name: "Bread Flour", pct: 100 }],
     hydrationPct: 68,
     starterPct: 18,
@@ -166,7 +170,6 @@ const defaultSettings = {
   levainBufferPct: 10,
   ingredientBufferPct: 3,
   mixerCapacityG: 7000,
-  ovenCapacityUnits: 8,
   proofingCapacityUnits: 24,
   defaultStartTime: "06:00",
 };
@@ -303,7 +306,8 @@ function calculateRecipePlan(recipe, quantity, env, settings) {
     doughWeight / Math.min(recipe.batchMaxDoughG, settings.mixerCapacityG)
   );
 
-  const ovenLoads = Math.ceil(qty / settings.ovenCapacityUnits);
+  const recipeOvenCapacity = Math.max(1, Number(recipe.ovenCapacityUnits) || 1);
+  const ovenLoads = Math.ceil(qty / recipeOvenCapacity);
 
   const totalProcessMin =
     recipe.process.autolyseMin +
@@ -335,6 +339,7 @@ function calculateRecipePlan(recipe, quantity, env, settings) {
     bakeTempF,
     batchesByMixer,
     ovenLoads,
+    recipeOvenCapacity,
     totalProcessMin,
   };
 }
@@ -817,7 +822,8 @@ export default function App() {
                           <p className="muted small">
                             {recipe.finishedUnitWeight}g finished weight •{" "}
                             {recipe.hydrationPct}% base hydration •{" "}
-                            {recipe.starterPct}% starter
+                            {recipe.starterPct}% starter • oven holds{" "}
+                            {recipe.ovenCapacityUnits} {recipe.unitsLabel}
                           </p>
                         </div>
                         <NumberInput
@@ -1054,6 +1060,14 @@ export default function App() {
                       updateRecipeField("batchMaxDoughG", Number(v))
                     }
                     suffix="g"
+                  />
+                  <NumberInput
+                    label="Oven Capacity Per Load"
+                    value={selectedRecipe.ovenCapacityUnits}
+                    onChange={(v) =>
+                      updateRecipeField("ovenCapacityUnits", Number(v))
+                    }
+                    suffix={selectedRecipe.unitsLabel}
                   />
                 </div>
 
@@ -1349,6 +1363,8 @@ export default function App() {
                         <th>Qty</th>
                         <th>Total Dough</th>
                         <th>Batches</th>
+                        <th>Oven Capacity</th>
+                        <th>Oven Loads</th>
                         <th>Bulk</th>
                         <th>Proof</th>
                         <th>Bake</th>
@@ -1363,6 +1379,10 @@ export default function App() {
                           <td>{plan.quantity}</td>
                           <td>{round(plan.doughWeight)}g</td>
                           <td>{plan.batchesByMixer}</td>
+                          <td>
+                            {plan.recipeOvenCapacity} {plan.recipe.unitsLabel}
+                          </td>
+                          <td>{plan.ovenLoads}</td>
                           <td>{minutesToLabel(plan.bulkMin)}</td>
                           <td>{minutesToLabel(plan.finalProofMin)}</td>
                           <td>
@@ -1386,7 +1406,8 @@ export default function App() {
                   <h2>Permanent Settings</h2>
                   <p>
                     These stay saved as assumptions for your regular bake location
-                    and equipment.
+                    and equipment. Recipe-specific oven capacity is now handled
+                    inside each recipe.
                   </p>
                 </div>
 
@@ -1425,17 +1446,6 @@ export default function App() {
                       setSettings((p) => ({ ...p, mixerCapacityG: Number(v) }))
                     }
                     suffix="g dough"
-                  />
-                  <NumberInput
-                    label="Oven Capacity"
-                    value={settings.ovenCapacityUnits}
-                    onChange={(v) =>
-                      setSettings((p) => ({
-                        ...p,
-                        ovenCapacityUnits: Number(v),
-                      }))
-                    }
-                    suffix="units"
                   />
                   <NumberInput
                     label="Proofing Capacity"
