@@ -208,6 +208,30 @@ function round(value, digits = 0) {
   return Math.round((Number(value) || 0) * factor) / factor;
 }
 
+const GRAMS_PER_OUNCE = 28.349523125;
+
+function formatGrams(value) {
+  return `${Math.round(Number(value) || 0).toLocaleString("en-US")}g`;
+}
+
+function formatOunces(value) {
+  return ((Number(value) || 0) / GRAMS_PER_OUNCE).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatWeight(value, label = "") {
+  const grams = Number(value) || 0;
+
+  const base =
+    grams > GRAMS_PER_OUNCE
+      ? `${formatGrams(grams)}/${formatOunces(grams)}oz`
+      : formatGrams(grams);
+
+  return label ? `${base} ${label}` : base;
+}
+
 function minutesToLabel(minutes) {
   const h = Math.floor(minutes / 60);
   const m = Math.round(minutes % 60);
@@ -541,7 +565,7 @@ function buildProductionSchedule(plans, settings) {
       name: "Mix dough",
       earliestStart: state.autolyseEnd,
       duration: Number(process.mixMin) || 0,
-      note: `${Math.round(plan.doughWeight)}g dough`,
+      note: formatWeight(plan.doughWeight, "dough"),
     });
 
     state.mixEnd = mixTask.end;
@@ -948,7 +972,13 @@ export default function App() {
     setRecipes((prev) =>
       prev.map((r) =>
         r.id === selectedRecipe.id
-          ? { ...r, process: { ...normalizeRecipe(r).process, [field]: Number(value) || 0 } }
+          ? {
+              ...r,
+              process: {
+                ...normalizeRecipe(r).process,
+                [field]: Number(value) || 0,
+              },
+            }
           : r
       )
     );
@@ -1323,7 +1353,7 @@ export default function App() {
               <StatCard
                 icon={Wheat}
                 label="Starter Needed"
-                value={`${round(totals.bufferedStarterG)} g`}
+                value={formatWeight(totals.bufferedStarterG)}
                 sub={`includes ${settings.levainBufferPct}% levain buffer`}
               />
               <StatCard
@@ -1750,25 +1780,25 @@ export default function App() {
               <StatCard
                 icon={FlaskConical}
                 label="Total Mature Levain"
-                value={`${round(levain.totalLevain)} g`}
+                value={formatWeight(levain.totalLevain)}
                 sub="including buffer"
               />
               <StatCard
                 icon={Wheat}
                 label="Flour for Levain"
-                value={`${round(levain.flour)} g`}
+                value={formatWeight(levain.flour)}
                 sub={`${settings.starterHydrationPct}% hydration`}
               />
               <StatCard
                 icon={Droplets}
                 label="Water for Levain"
-                value={`${round(levain.water)} g`}
+                value={formatWeight(levain.water)}
                 sub="for levain build"
               />
               <StatCard
                 icon={ChefHat}
                 label="Seed Starter Estimate"
-                value={`${round(levain.seedStarter)} g`}
+                value={formatWeight(levain.seedStarter)}
                 sub="editable later as feeding ratios are added"
               />
             </div>
@@ -1839,27 +1869,27 @@ export default function App() {
                         ([name, grams]) => (
                           <div key={name} className="line-item">
                             <span>{name}</span>
-                            <strong>{round(grams)} g</strong>
+                            <strong>{formatWeight(grams)}</strong>
                           </div>
                         )
                       )}
                       <div className="line-item">
                         <span>Water</span>
-                        <strong>{round(totals.bufferedWaterG)} g</strong>
+                        <strong>{formatWeight(totals.bufferedWaterG)}</strong>
                       </div>
                       <div className="line-item">
                         <span>Mature Starter / Levain</span>
-                        <strong>{round(totals.bufferedStarterG)} g</strong>
+                        <strong>{formatWeight(totals.bufferedStarterG)}</strong>
                       </div>
                       <div className="line-item">
                         <span>Salt</span>
-                        <strong>{round(totals.bufferedSaltG)} g</strong>
+                        <strong>{formatWeight(totals.bufferedSaltG)}</strong>
                       </div>
                       {Object.entries(totals.otherMap).map(([name, grams]) => (
                         <div key={name} className="line-item">
                           <span>{name}</span>
                           <strong>
-                            {round(grams * (1 + settings.ingredientBufferPct / 100))} g
+                            {formatWeight(grams * (1 + settings.ingredientBufferPct / 100))}
                           </strong>
                         </div>
                       ))}
@@ -1960,7 +1990,7 @@ export default function App() {
                             <strong>{plan.recipe.name}</strong>
                           </td>
                           <td>{plan.quantity}</td>
-                          <td>{round(plan.doughWeight)}g</td>
+                          <td>{formatWeight(plan.doughWeight)}</td>
                           <td>{plan.batchesByMixer}</td>
                           <td>{plan.recipe.vesselType || ""}</td>
                           <td>
