@@ -302,7 +302,7 @@ function calculateRecipePlan(recipe, quantity, env, settings) {
   const bakeMin = recipe.process.bakeMin * (1 + altitudeAdj.timePct / 100);
   const bakeTempF = recipe.process.bakeTempF + altitudeAdj.tempF;
 
-  const ByMixer = Math.ceil(
+  const batchesByMixer = Math.ceil(
     doughWeight / Math.min(recipe.batchMaxDoughG, settings.mixerCapacityG)
   );
 
@@ -337,7 +337,7 @@ function calculateRecipePlan(recipe, quantity, env, settings) {
     finalProofMin,
     bakeMin,
     bakeTempF,
-    ByMixer,
+    batchesByMixer,
     ovenLoads,
     recipeOvenCapacity,
     totalProcessMin,
@@ -670,11 +670,11 @@ export default function App() {
     const list = [];
     const totalOvenLoads = plans.reduce((sum, p) => sum + p.ovenLoads, 0);
     const maxUnitsAtOnce = plans.reduce((sum, p) => sum + p.quantity, 0);
-    const maxBatch = plans.some((p) => p.ByMixer > 1);
+    const maxBatch = plans.some((p) => p.batchesByMixer > 1);
 
     if (maxBatch) {
       list.push(
-        "One or more products exceed mixer or recipe batch capacity and need split ."
+        "One or more products exceed mixer or recipe batch capacity and need split batches."
       );
     }
 
