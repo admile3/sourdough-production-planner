@@ -178,6 +178,19 @@ const defaultSettings = {
   defaultStartTime: "06:00",
 };
 
+function loadFromStorage(key, fallback) {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveToStorage(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
 function round(value, digits = 0) {
   const factor = Math.pow(10, digits);
   return Math.round((Number(value) || 0) * factor) / factor;
@@ -593,6 +606,7 @@ function TextInput({ label, value, onChange, placeholder = "" }) {
     <label className="field">
       <span>{label}</span>
       <input
+        className="text-field"
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
@@ -603,17 +617,30 @@ function TextInput({ label, value, onChange, placeholder = "" }) {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("planner");
-  const [recipes, setRecipes] = useState(initialRecipes);
-  const [settings, setSettings] = useState(defaultSettings);
-  const [env, setEnv] = useState({ tempF: 74, humidityPct: 52 });
-  const [productionDate, setProductionDate] = useState(getTodayISODate());
-  const [quantities, setQuantities] = useState({
-    "rustic-loaf": 12,
-    ciabatta: 20,
-    baguette: 24,
-    "sandwich-loaf": 8,
-  });
-  const [selectedRecipeId, setSelectedRecipeId] = useState(initialRecipes[0].id);
+  const [recipes, setRecipes] = useState(() =>
+    loadFromStorage("sourdoughPlannerRecipes", initialRecipes)
+  );
+  const [settings, setSettings] = useState(() =>
+    loadFromStorage("sourdoughPlannerSettings", defaultSettings)
+  );
+  const [env, setEnv] = useState(() =>
+    loadFromStorage("sourdoughPlannerEnv", { tempF: 74, humidityPct: 52 })
+  );
+  const [productionDate, setProductionDate] = useState(() =>
+    loadFromStorage("sourdoughPlannerProductionDate", getTodayISODate())
+  );
+  const [quantities, setQuantities] = useState(() =>
+    loadFromStorage("sourdoughPlannerQuantities", {
+      "rustic-loaf": 12,
+      ciabatta: 20,
+      baguette: 24,
+      "sandwich-loaf": 8,
+    })
+  );
+  const [selectedRecipeId, setSelectedRecipeId] = useState(
+    recipes[0]?.id || initialRecipes[0].id
+  );
+  const [lastSavedAt, setLastSavedAt] = useState("");
 
   const plans = useMemo(() => {
     return recipes
@@ -720,6 +747,21 @@ export default function App() {
 
   const selectedRecipe =
     recipes.find((r) => r.id === selectedRecipeId) || recipes[0];
+
+  function savePlannerData() {
+    saveToStorage("sourdoughPlannerRecipes", recipes);
+    saveToStorage("sourdoughPlannerSettings", settings);
+    saveToStorage("sourdoughPlannerEnv", env);
+    saveToStorage("sourdoughPlannerProductionDate", productionDate);
+    saveToStorage("sourdoughPlannerQuantities", quantities);
+
+    setLastSavedAt(
+      new Date().toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    );
+  }
 
   function updateRecipeField(field, value) {
     setRecipes((prev) =>
@@ -841,7 +883,7 @@ export default function App() {
     const base = {
       ...initialRecipes[0],
       id,
-      name: "New Sourdough Product",
+      name: "New Recipe",
       category: "Custom",
       unitsLabel: "units",
       vesselType: "Tray / Pan",
@@ -850,6 +892,7 @@ export default function App() {
     };
     setRecipes((prev) => [...prev, base]);
     setSelectedRecipeId(id);
+    setQuantities((prev) => ({ ...prev, [id]: 0 }));
     setActiveTab("recipes");
   }
 
@@ -860,12 +903,18 @@ export default function App() {
       { ...selectedRecipe, id, name: `${selectedRecipe.name} Copy` },
     ]);
     setSelectedRecipeId(id);
+    setQuantities((prev) => ({ ...prev, [id]: quantities[selectedRecipe.id] || 0 }));
   }
 
   function deleteRecipe(id) {
     if (recipes.length <= 1) return;
     setRecipes((prev) => prev.filter((r) => r.id !== id));
     setSelectedRecipeId(recipes.find((r) => r.id !== id)?.id || recipes[0].id);
+    setQuantities((prev) => {
+      const updated = { ...prev };
+      delete updated[id];
+      return updated;
+    });
   }
 
   const tabButton = (id, label, Icon) => (
@@ -1109,8 +1158,14 @@ export default function App() {
                       added ingredients, dish type, yield, timing, and oven
                       capacity.
                     </p>
+                    {lastSavedAt && (
+                      <p className="saved-status">Saved at {lastSavedAt}</p>
+                    )}
                   </div>
                   <div className="button-row">
+                    <Button onClick={savePlannerData}>
+                      <Save size={16} /> Save
+                    </Button>
                     <Button variant="outline" onClick={duplicateRecipe}>
                       <Copy size={16} /> Duplicate
                     </Button>
@@ -1127,6 +1182,7 @@ export default function App() {
                   <label className="field span-two">
                     <span>Product Name</span>
                     <input
+                      className="text-field"
                       value={selectedRecipe.name}
                       onChange={(e) =>
                         updateRecipeField("name", e.target.value)
@@ -1227,7 +1283,7 @@ export default function App() {
 
                   <div className="stack">
                     {selectedRecipe.flourTypes.map((flour, index) => (
-                      <div key={`${flour.name}-${index}`} className="recipe-row">
+                      <div key={`flour-${index}`} className="recipe-row editable-row">
                         <TextInput
                           label="Flour Name"
                           value={flour.name}
@@ -1274,8 +1330,8 @@ export default function App() {
 
                     {selectedRecipe.otherIngredients.map((ingredient, index) => (
                       <div
-                        key={`${ingredient.name}-${index}`}
-                        className="recipe-row"
+                        key={`ingredient-${index}`}
+                        className="recipe-row editable-row"
                       >
                         <TextInput
                           label="Ingredient Name"
@@ -1461,6 +1517,7 @@ export default function App() {
                     <label className="field production-date-field">
                       <span>Production Date</span>
                       <input
+                        className="text-field"
                         type="date"
                         value={productionDate}
                         onChange={(e) => setProductionDate(e.target.value)}
@@ -1720,6 +1777,7 @@ export default function App() {
                   <label className="field">
                     <span>Default Start Time</span>
                     <input
+                      className="text-field"
                       type="time"
                       value={settings.defaultStartTime}
                       onChange={(e) =>
