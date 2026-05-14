@@ -364,181 +364,282 @@ function calculateRecipePlan(recipe, quantity, env, settings) {
 function buildProductionSchedule(plans, settings) {
   const startMin = timeToMinutes(settings.defaultStartTime || "06:00");
 
-  let mixerAvailableAt = startMin;
   let bakerAvailableAt = startMin;
+  let mixerAvailableAt = startMin;
   let ovenAvailableAt = startMin;
 
   const schedule = [];
+  const productStates = new Map();
 
   const sortedPlans = [...plans].sort((a, b) => {
-    return b.totalProcessMin - a.totalProcessMin;
+    const aLead =
+      a.recipe.process.autolyseMin +
+      a.recipe.process.mixMin +
+      a.bulkMin +
+      a.recipe.process.benchRestMin +
+      a.finalProofMin;
+    const bLead =
+      b.recipe.process.autolyseMin +
+      b.recipe.process.mixMin +
+      b.bulkMin +
+      b.recipe.process.benchRestMin +
+      b.finalProofMin;
+
+    return bLead - aLead;
   });
 
-  sortedPlans.forEach((plan) => {
-    const product = plan.recipe.name;
-    const qty = plan.quantity;
-    const process = plan.recipe.process;
-
-    const addTask = ({
+  const pushTask = ({ plan, name, resource, start, duration, note = "" }) => {
+    const task = {
+      product: plan.recipe.name,
+      qty: plan.quantity,
       name,
+      resource,
+      start,
+      end: start + duration,
       duration,
-      earliestStart,
-      resource = "passive",
-      note = "",
-    }) => {
-      let start = earliestStart;
-
-      if (resource === "mixer") {
-        start = Math.max(start, mixerAvailableAt, bakerAvailableAt);
-        mixerAvailableAt = start + duration;
-        bakerAvailableAt = start + duration;
-      }
-
-      if (resource === "baker") {
-        start = Math.max(start, bakerAvailableAt);
-        bakerAvailableAt = start + duration;
-      }
-
-      if (resource === "oven") {
-        start = Math.max(start, ovenAvailableAt, bakerAvailableAt);
-        ovenAvailableAt = start + duration;
-        bakerAvailableAt = start + Math.min(duration, 8);
-      }
-
-      const end = start + duration;
-
-      schedule.push({
-        product,
-        qty,
-        name,
-        resource,
-        start,
-        end,
-        duration,
-        note,
-      });
-
-      return end;
+      note,
     };
 
-    let current = startMin;
+    schedule.push(task);
+    return task;
+  };
 
-    if (process.autolyseMin > 0) {
-      current = addTask({
-        name: "Start autolyse",
-        duration: process.autolyseMin,
-        earliestStart: current,
-        resource: "baker",
+  const scheduleBakerTask = ({ plan, name, earliestStart, duration, note = "" }) => {
+    const start = Math.max(earliestStart, bakerAvailableAt);
+    const task = pushTask({
+      plan,
+      name,
+      resource: "baker",
+      start,
+      duration,
+      note,
+    });
+
+    bakerAvailableAt = task.end;
+    return task;
+  };
+
+  const scheduleMixerTask = ({ plan, name, earliestStart, duration, note = "" }) => {
+    const start = Math.max(earliestStart, bakerAvailableAt, mixerAvailableAt);
+    const task = pushTask({
+      plan,
+      name,
+      resource: "mixer",
+      start,
+      duration,
+      note,
+    });
+
+    bakerAvailableAt = task.end;
+    mixerAvailableAt = task.end;
+    return task;
+  };
+
+  const scheduleOvenTask = ({ plan, name, earliestStart, duration, note = "" }) => {
+    const start = Math.max(earliestStart, bakerAvailableAt, ovenAvailableAt);
+    const task = pushTask({
+      plan,
+      name,
+      resource: "oven",
+      start,
+      duration,
+      note,
+    });
+
+    ovenAvailableAt = task.end;
+    bakerAvailableAt = start + Math.min(duration, 8);
+    return task;
+  };
+
+  const schedulePassiveTask = ({ plan, name, start, duration, note = "" }) => {
+    return pushTask({
+      plan,
+      name,
+      resource: "passive",
+      start,
+      duration,
+      note,
+    });
+  };
+
+  const scheduleFoldsInsideBulk = (plan, bulkStart, bulkEnd) => {
+    const process = plan.recipe.process;
+    const foldCount = Number(process.foldCount) || 0;
+    const foldInterval = Number(process.foldIntervalMin) || 30;
+
+    for (let i = 1; i <= foldCount; i++) {
+      const targetStart = bulkStart + i * foldInterval;
+      const latestReasonableStart = Math.max(bulkStart, bulkEnd - 5);
+      const foldStart = Math.min(targetStart, latestReasonableStart);
+
+      scheduleBakerTask({
+        plan,
+        name: `Fold ${i}`,
+        earliestStart: foldStart,
+        duration: 5,
         note: "",
       });
     }
+  };
 
-    current = addTask({
+  sortedPlans.forEach((plan) => {
+    const process = plan.recipe.process;
+    const autolyseMin = Number(process.autolyseMin) || 0;
+
+    let autolyseStart = startMin;
+    let autolyseEnd = startMin;
+
+    if (autolyseMin > 0) {
+      const autolyseTask = scheduleBakerTask({
+        plan,
+        name: "Start autolyse",
+        earliestStart: startMin,
+        duration: autolyseMin,
+        note: "",
+      });
+
+      autolyseStart = autolyseTask.start;
+      autolyseEnd = autolyseTask.end;
+    }
+
+    productStates.set(plan.recipe.id, {
+      plan,
+      autolyseStart,
+      autolyseEnd,
+      mixEnd: null,
+      bulkStart: null,
+      bulkEnd: null,
+      readyForShapeAt: null,
+      readyForBakeAt: null,
+      bakedAt: null,
+    });
+  });
+
+  Array.from(productStates.values()).forEach((state) => {
+    const plan = state.plan;
+    const process = plan.recipe.process;
+
+    const mixTask = scheduleMixerTask({
+      plan,
       name: "Mix dough",
-      duration: process.mixMin,
-      earliestStart: current,
-      resource: "mixer",
+      earliestStart: state.autolyseEnd,
+      duration: Number(process.mixMin) || 0,
       note: `${Math.round(plan.doughWeight)}g dough`,
     });
 
-    const bulkStart = current;
-    const bulkEnd = bulkStart + plan.bulkMin;
+    state.mixEnd = mixTask.end;
+    state.bulkStart = mixTask.end;
+    state.bulkEnd = state.bulkStart + plan.bulkMin;
 
-    schedule.push({
-      product,
-      qty,
+    schedulePassiveTask({
+      plan,
       name: "Bulk fermentation",
-      resource: "passive",
-      start: bulkStart,
-      end: bulkEnd,
+      start: state.bulkStart,
       duration: plan.bulkMin,
       note: "",
     });
 
-    const foldCount = process.foldCount || 0;
-    const foldInterval = process.foldIntervalMin || 30;
+    scheduleFoldsInsideBulk(plan, state.bulkStart, state.bulkEnd);
 
-    for (let i = 1; i <= foldCount; i++) {
-      const foldStartTarget = bulkStart + i * foldInterval;
+    state.readyForShapeAt = state.bulkEnd;
+  });
 
-      addTask({
-        name: `Fold ${i}`,
-        duration: 5,
-        earliestStart: foldStartTarget,
-        resource: "baker",
-        note: "",
-      });
-    }
+  const shapingQueue = Array.from(productStates.values()).sort(
+    (a, b) => a.readyForShapeAt - b.readyForShapeAt
+  );
 
-    current = bulkEnd;
+  shapingQueue.forEach((state) => {
+    const plan = state.plan;
+    const process = plan.recipe.process;
 
-    if (process.benchRestMin > 0) {
-      current = addTask({
+    let current = state.readyForShapeAt;
+
+    if ((Number(process.benchRestMin) || 0) > 0) {
+      const divideTask = scheduleBakerTask({
+        plan,
         name: "Divide and pre-shape",
-        duration: 12,
         earliestStart: current,
-        resource: "baker",
+        duration: 12,
         note: "",
       });
 
-      schedule.push({
-        product,
-        qty,
+      current = divideTask.end;
+
+      schedulePassiveTask({
+        plan,
         name: "Bench rest",
-        resource: "passive",
         start: current,
-        end: current + process.benchRestMin,
-        duration: process.benchRestMin,
+        duration: Number(process.benchRestMin) || 0,
         note: "",
       });
 
-      current += process.benchRestMin;
+      current += Number(process.benchRestMin) || 0;
     }
 
-    current = addTask({
+    const shapeTask = scheduleBakerTask({
+      plan,
       name: "Final shape",
-      duration: Math.max(10, qty * 2),
       earliestStart: current,
-      resource: "baker",
+      duration: Math.max(10, plan.quantity * 2),
       note: "",
     });
 
-    schedule.push({
-      product,
-      qty,
+    current = shapeTask.end;
+
+    schedulePassiveTask({
+      plan,
       name: "Final proof",
-      resource: "passive",
       start: current,
-      end: current + plan.finalProofMin,
       duration: plan.finalProofMin,
       note: "",
     });
 
-    current += plan.finalProofMin;
+    state.readyForBakeAt = current + plan.finalProofMin;
+  });
+
+  const bakeQueue = Array.from(productStates.values()).sort(
+    (a, b) => a.readyForBakeAt - b.readyForBakeAt
+  );
+
+  bakeQueue.forEach((state) => {
+    const plan = state.plan;
+    let current = state.readyForBakeAt;
 
     for (let load = 1; load <= plan.ovenLoads; load++) {
-      current = addTask({
+      const bakeTask = scheduleOvenTask({
+        plan,
         name: plan.ovenLoads > 1 ? `Bake load ${load}` : "Bake",
-        duration: plan.bakeMin,
         earliestStart: current,
-        resource: "oven",
+        duration: plan.bakeMin,
         note: `${Math.round(plan.bakeTempF)}°F`,
       });
+
+      current = bakeTask.end;
     }
 
-    schedule.push({
-      product,
-      qty,
+    state.bakedAt = current;
+
+    schedulePassiveTask({
+      plan,
       name: "Cool",
-      resource: "passive",
       start: current,
-      end: current + process.coolMin,
-      duration: process.coolMin,
+      duration: Number(plan.recipe.process.coolMin) || 0,
       note: "",
     });
   });
 
-  return schedule.sort((a, b) => a.start - b.start);
+  return schedule.sort((a, b) => {
+    if (a.start !== b.start) return a.start - b.start;
+
+    const resourceOrder = {
+      baker: 1,
+      mixer: 2,
+      passive: 3,
+      oven: 4,
+    };
+
+    return (resourceOrder[a.resource] || 99) - (resourceOrder[b.resource] || 99);
+  });
 }
 
 function StatCard({ icon: Icon, label, value, sub }) {
@@ -1704,9 +1805,10 @@ export default function App() {
                 <div className="soft-panel">
                   <h3>Resource-Aware Production Timeline</h3>
                   <p className="muted small">
-                    This schedule prevents overlapping mixer, oven, and hands-on
-                    baker tasks. Passive fermentation, proofing, and cooling can
-                    overlap.
+                    This schedule front-loads autolyse and mixing so products
+                    can share passive bulk fermentation, proofing, and cooling
+                    time while still preventing mixer, oven, and hands-on baker
+                    conflicts.
                   </p>
                 </div>
 
