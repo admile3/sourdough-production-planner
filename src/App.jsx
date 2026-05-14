@@ -186,7 +186,7 @@ function minutesToLabel(minutes) {
 
 function addMinutesToTime(time, minutes) {
   const [h, m] = time.split(":").map(Number);
-  const base = h * 60 + m + minutes;
+  const base = h * 60 + m + Math.round(minutes);
   const dayMin = ((base % 1440) + 1440) % 1440;
   const hh = String(Math.floor(dayMin / 60)).padStart(2, "0");
   const mm = String(dayMin % 60).padStart(2, "0");
