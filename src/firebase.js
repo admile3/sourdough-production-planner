@@ -3,12 +3,12 @@ import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "PASTE_YOURS_HERE",
-  authDomain: "PASTE_YOURS_HERE",
-  projectId: "PASTE_YOURS_HERE",
-  storageBucket: "PASTE_YOURS_HERE",
-  messagingSenderId: "PASTE_YOURS_HERE",
-  appId: "PASTE_YOURS_HERE",
+  apiKey: "AIzaSyDvW_HTVOrRzDCz7GwpgqAh8O2uBxziio8",
+  authDomain: "sourdough-production-planner.firebaseapp.com",
+  projectId: "sourdough-production-planner",
+  storageBucket: "sourdough-production-planner.firebasestorage.app",
+  messagingSenderId: "45332994857",
+  appId: "1:45332994857:web:7cccb2b85a652899217538",
 };
 
 const app = initializeApp(firebaseConfig);
